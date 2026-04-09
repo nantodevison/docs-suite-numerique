@@ -34,8 +34,6 @@ cp .env.example .env
 
 | Variable         | Description                          |
 |-----------------|--------------------------------------|
-| `DOCS_API_URL`  | URL de base de l'API Docs            |
-| `DOCS_API_KEY`  | Clé d'API Docs                       |
 | `GRIST_API_URL` | URL de base de l'API Grist           |
 | `GRIST_API_KEY` | Clé d'API Grist                      |
 | `GRIST_DOC_ID`  | Identifiant du document Grist cible  |
