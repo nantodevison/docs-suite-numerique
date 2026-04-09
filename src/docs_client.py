@@ -224,3 +224,116 @@ class DocsClient:
                     "error": str(e),
                 })
         return results
+
+    # ──────────────────────────────────────────────
+    #  TRAVERSÉE ET APLATISSEMENT DU TREE
+    # ──────────────────────────────────────────────
+
+    @staticmethod
+    def _path_to_ordre(path: str) -> int:
+        """
+        Convertit le dernier segment de 7 caractères du path (base-36) en entier.
+        Permet de trier les chapitres frères dans leur ordre natif Docs.
+        """
+        if not path:
+            return 0
+        return int(path[-7:], 36)
+
+    def flatten_tree(self, node: dict, base_url: str,
+                     parent_numero: str = None, position: int = 1,
+                     is_root: bool = False) -> list[dict]:
+        """
+        Parcourt récursivement le tree retourné par get_tree() et retourne
+        une liste de records prêts à être insérés dans Grist.
+
+        Champs remplis : titre, niveau, ordre, numero, url, contenu.
+        Champs non remplis (à compléter manuellement) :
+            document, parent_chapitre, mots_cles, themes.
+
+        Args:
+            node: nœud du tree (dict avec id, title, depth, path, children…)
+            base_url: URL de base de l'instance Docs (ex: https://docs.numerique.gouv.fr)
+            parent_numero: numéro hiérarchique du parent (ex: "1.3"), None pour la racine
+            position: position du nœud parmi ses frères (1-indexé)
+            is_root: si True, le nœud racine est ignoré et ses enfants sont
+                     numérotés à partir de 1 directement (Guide=1, Outils=2, etc.)
+
+        Returns:
+            list de dicts {"fields": {...}} pour l'API Grist
+        """
+        records = []
+
+        doc_id = node.get("id", "")
+        titre = node.get("title", "")
+        niveau = node.get("depth", 1)
+        path = node.get("path", "")
+
+        children = node.get("children", [])
+        numchild = node.get("numchild", 0)
+
+        # Le tree ne retourne pas toujours tous les enfants (children: [] malgré numchild > 0).
+        # On les récupère via fetch_children_with_content qui remonte aussi le contenu,
+        # évitant ainsi un appel get_markdown() supplémentaire par enfant.
+        children_content = {}
+        if numchild > 0 and not children:
+            try:
+                raw = self.fetch_children_with_content(doc_id)
+                children_content = {c["id"]: c.get("content_markdown", "") for c in raw}
+                children = [
+                    {
+                        "id": c["id"],
+                        "title": c.get("title", ""),
+                        "depth": niveau + 1,
+                        "path": "",
+                        "numchild": 0,   # sera récupéré récursivement si besoin
+                        "children": [],
+                        "_content": c.get("content_markdown", ""),
+                    }
+                    for c in raw
+                ]
+            except Exception as e:
+                print(f"  ⚠️  Impossible de récupérer les enfants de {doc_id} ({titre}): {e}")
+
+        # Le nœud racine n'est pas numéroté : on traite ses enfants directement
+        if is_root:
+            print(f"[racine] {titre}")
+            for i, child in enumerate(children, start=1):
+                records.extend(
+                    self.flatten_tree(child, base_url,
+                                      parent_numero=None, position=i)
+                )
+            return records
+
+        ordre = self._path_to_ordre(path)
+        numero = f"{parent_numero}.{position}" if parent_numero else str(position)
+        url = f"{base_url.rstrip('/')}/docs/{doc_id}/"
+
+        print(f"  {'  ' * (niveau - 2)}[{numero}] {titre}")
+
+        # Le contenu peut avoir été pré-chargé par le parent via fetch_children_with_content
+        contenu = node.get("_content")
+        if contenu is None:
+            try:
+                contenu = self.get_markdown(doc_id)
+            except Exception as e:
+                print(f"  ⚠️  Contenu non récupéré pour {doc_id} ({titre}): {e}")
+                contenu = ""
+
+        records.append({
+            "fields": {
+                "titre": titre,
+                "niveau": niveau - 1,
+                "ordre": ordre,
+                "numero": numero,
+                "url": url,
+                "contenu": contenu,
+            }
+        })
+
+        for i, child in enumerate(children, start=1):
+            records.extend(
+                self.flatten_tree(child, base_url,
+                                  parent_numero=numero, position=i)
+            )
+
+        return records
