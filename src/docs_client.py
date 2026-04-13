@@ -2,9 +2,85 @@
 """Client pour l'API Docs (Suite Numérique)."""
 
 import re
+from html.parser import HTMLParser
 from urllib.parse import urlparse
 
 import requests
+
+# ──────────────────────────────────────────────
+#  DÉTECTION D'ÉMOJIS
+# ──────────────────────────────────────────────
+
+# Couvre les plages Unicode utilisées pour les émojis courants.
+# Reproduit la logique de la lib `emoji-regex` utilisée côté frontend Docs
+# (cf. src/frontend/.../doc-management/utils.ts → getEmojiAndTitle).
+_EMOJI_RE = re.compile(
+    r"(?:"
+    r"[\U0001F000-\U0001FFFF]"   # Emojis modernes (visages, objets, voyages…)
+    r"|[\U00002600-\U000027BF]"  # Symboles divers, météo, dingbats
+    r"|[\U0001F900-\U0001FA9F]"  # Symboles supplémentaires
+    r"|[\U00002B50-\U00002B55]"  # Étoiles
+    r"|[\U000025FB-\U000025FE]"  # Carrés géométriques
+    r"|[\U00003030\U0000303D]"   # CJK
+    r")"
+    r"[\U0001F3FB-\U0001F3FF]?"  # Modificateurs de teint (Fitzpatrick)
+    r"(?:\u200D(?:"              # ZWJ sequence
+    r"[\U0001F000-\U0001FFFF]"
+    r"|[\U00002600-\U000027BF]"
+    r")[\U0001F3FB-\U0001F3FF]?)*"
+    r"\uFE0F?",                  # Sélecteur de variation
+    re.UNICODE,
+)
+
+
+# ──────────────────────────────────────────────
+#  SUPPRESSION DES BLOCS DE CODE MARKDOWN
+# ──────────────────────────────────────────────
+
+# Supprime les blocs ``` … ``` (SQL, Python, bash…) pour éviter les faux
+# positifs WAF (Incapsula bloque les POST contenant du SQL notamment).
+_CODE_BLOCK_RE = re.compile(r'```[^\n]*\n.*?```', re.DOTALL)
+
+
+# ──────────────────────────────────────────────
+#  CONVERTISSEUR HTML → TEXTE
+# ──────────────────────────────────────────────
+
+class _HTMLTextExtractor(HTMLParser):
+    """Extrait le texte brut d'un fragment HTML en préservant les émojis."""
+
+    _BLOCK_TAGS = frozenset(
+        ["p", "div", "br", "li", "tr", "th", "td",
+         "h1", "h2", "h3", "h4", "h5", "h6",
+         "blockquote", "pre", "section", "article"]
+    )
+    _SKIP_TAGS = frozenset(["script", "style"])
+
+    def __init__(self):
+        super().__init__()
+        self._parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._SKIP_TAGS:
+            self._skip_depth += 1
+        elif tag in self._BLOCK_TAGS and self._parts and self._parts[-1] != "\n":
+            self._parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in self._SKIP_TAGS:
+            self._skip_depth = max(0, self._skip_depth - 1)
+        elif tag in self._BLOCK_TAGS:
+            self._parts.append("\n")
+
+    def handle_data(self, data):
+        if self._skip_depth == 0:
+            self._parts.append(data)
+
+    def get_text(self) -> str:
+        # Collapse consecutive newlines to max 2
+        text = "".join(self._parts)
+        return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 class DocsClient:
@@ -98,13 +174,143 @@ class DocsClient:
             f"{self.api_url}/documents/{doc_id}/content/",
             params={"content_format": content_format},
         )
+
+        # HTTP 500 du Y-Provider : le contenu Yjs existe mais n'est pas
+        # convertible (document trop minimal, structure corrompue, etc.).
+        # On traite ce cas comme un contenu vide plutôt que de planter.
+        if resp.status_code == 500:
+            print(f"    ⚠️  Y-Provider 500 pour {doc_id} [{content_format}] "
+                  f"— contenu non convertible, traité comme vide.")
+            return {"content": ""}
+
         resp.raise_for_status()
         return resp.json()
 
     def get_markdown(self, doc_id):
         """Raccourci pour get_content en markdown."""
         data = self.get_content(doc_id, "markdown")
-        return data.get("content", "")
+        # Utilise `or ""` et non `.get("content", "")` : si l'API renvoie
+        # {"content": null} (document vide), .get() retourne None (la clé
+        # existe) — le défaut "" ne s'applique que quand la clé est absente.
+        return data.get("content") or ""
+
+    def get_html(self, doc_id):
+        """Raccourci pour get_content en HTML."""
+        data = self.get_content(doc_id, "html")
+        return data.get("content") or ""
+
+    def get_markdown_with_emoji_fallback(self, doc_id):
+        """
+        Récupère le contenu en markdown.
+
+        Si la conversion markdown échoue (erreur Y-Provider sur des nœuds
+        emoji BlockNote, par exemple), tente une récupération en HTML puis
+        convertit en texte brut — ce qui préserve les émojis Unicode.
+
+        Returns:
+            tuple(str, str): (contenu, format_utilisé)
+                format_utilisé vaut 'markdown', 'html' ou 'erreur'
+        """
+        # --- Tentative 1 : markdown ---
+        try:
+            md = self.get_markdown(doc_id)
+            if md is not None:
+                return md, "markdown"
+        except requests.HTTPError as exc:
+            print(f"    ↳ Markdown KO ({exc.response.status_code}), "
+                  f"tentative HTML…")
+        except Exception as exc:  # noqa: BLE001
+            print(f"    ↳ Markdown KO ({exc!s}), tentative HTML…")
+
+        # --- Tentative 2 : HTML → texte ---
+        try:
+            html = self.get_html(doc_id)
+            if html:
+                text = self.html_to_text(html)
+                return text, "html"
+        except Exception as exc:  # noqa: BLE001
+            print(f"    ↳ HTML KO ({exc!s})")
+
+        return "", "erreur"
+
+    def get_content_all_formats(self, doc_id: str) -> dict:
+        """
+        Récupère le contenu dans les trois formats disponibles.
+
+        Utile pour diagnostiquer comment les émojis sont représentés :
+        le format JSON (BlockNote) montre la structure brute avec les nœuds
+        emoji ; le format HTML les exprime souvent mieux que le markdown.
+
+        Returns:
+            dict avec les clés 'markdown', 'html', 'json',
+            et '<format>_error' en cas d'échec.
+        """
+        results: dict = {}
+        for fmt in ("markdown", "html", "json"):
+            try:
+                data = self.get_content(doc_id, fmt)
+                results[fmt] = data.get("content") or ""
+            except Exception as exc:  # noqa: BLE001
+                results[fmt] = None
+                results[f"{fmt}_error"] = str(exc)
+        return results
+
+    # ──────────────────────────────────────────────
+    #  UTILITAIRES STATIQUES
+    # ──────────────────────────────────────────────
+
+    @staticmethod
+    def html_to_text(html_content: str) -> str:
+        """
+        Convertit du HTML en texte brut en préservant les émojis Unicode.
+
+        Utilise uniquement la stdlib Python (html.parser) — pas de dépendance
+        externe.
+        """
+        parser = _HTMLTextExtractor()
+        parser.feed(html_content)
+        return parser.get_text()
+
+    @staticmethod
+    def extract_emoji_from_title(title: str) -> tuple:
+        """
+        Sépare l'émoji de tête du reste du titre, comme le fait le frontend
+        Docs (cf. utils.ts → getEmojiAndTitle).
+
+        Args:
+            title: titre complet (ex: "🎉 Mon document")
+
+        Returns:
+            (emoji, titre_propre)
+                emoji      : chaîne de l'émoji (ou None si absent)
+                titre_propre : titre sans l'émoji et sans espaces superflus
+        """
+        if not title:
+            return None, title or ""
+
+        stripped = title.lstrip()
+        m = _EMOJI_RE.match(stripped)
+        if m and stripped.startswith(m.group(0)):
+            emoji = m.group(0)
+            clean = stripped[len(emoji):].strip()
+            return emoji, clean
+
+        return None, title
+
+    @staticmethod
+    def count_emojis(text: str) -> int:
+        """Compte le nombre d'émojis dans un texte."""
+        return len(_EMOJI_RE.findall(text or ""))
+
+    @staticmethod
+    def strip_code_blocks(text: str) -> str:
+        """Supprime les blocs de code markdown (``` … ```) d'un texte.
+
+        Remplace chaque bloc par un marqueur textuel neutre.
+        Utile avant tout envoi vers des API sensibles aux injections
+        (WAF, filtres SQL, etc.).
+        """
+        return _CODE_BLOCK_RE.sub('[bloc de code supprimé]', text or "")
 
     # ──────────────────────────────────────────────
     #  LISTE DES SOUS-DOCUMENTS (ENFANTS)
@@ -186,7 +392,7 @@ class DocsClient:
         return {
             "id": doc_id,
             "title": metadata.get("title", ""),
-            "content_markdown": content_data.get("content", ""),
+            "content_markdown": content_data.get("content") or "",
             "created_at": metadata.get("created_at"),
             "updated_at": metadata.get("updated_at"),
         }
@@ -208,19 +414,21 @@ class DocsClient:
             child_id = child["id"]
             try:
                 content_data = self.get_content(child_id, "markdown")
+                # `or ""` gère le cas {"content": null} (document jamais édité)
                 results.append({
                     "id": child_id,
                     "title": child.get("title", ""),
-                    "content_markdown": content_data.get("content", ""),
+                    "content_markdown": content_data.get("content") or "",
                     "created_at": child.get("created_at"),
                     "updated_at": child.get("updated_at"),
                 })
-            except requests.HTTPError as e:
+            except Exception as e:  # noqa: BLE001
+                # HTTPError (400/500 Y-Provider), ConnectionError, etc.
                 print(f"⚠️  Erreur pour {child_id} ({child.get('title')}): {e}")
                 results.append({
                     "id": child_id,
                     "title": child.get("title", ""),
-                    "content_markdown": None,
+                    "content_markdown": None,  # None = signal pour re-fetch dans flatten_tree
                     "error": str(e),
                 })
         return results
@@ -240,13 +448,15 @@ class DocsClient:
         return int(path[-7:], 36)
 
     def flatten_tree(self, node: dict, base_url: str,
-                     parent_numero: str = None, position: int = 1,
-                     is_root: bool = False) -> list[dict]:
+                     parent_numero: str | None = None, position: int = 1,
+                     is_root: bool = False,
+                     content_format: str = "auto") -> list[dict]:
         """
         Parcourt récursivement le tree retourné par get_tree() et retourne
         une liste de records prêts à être insérés dans Grist.
 
-        Champs remplis : titre, niveau, ordre, numero, url, contenu.
+        Champs remplis : titre, emoji, titre_propre, niveau, ordre, numero,
+                         url, contenu, contenu_format.
         Champs non remplis (à compléter manuellement) :
             document, parent_chapitre, mots_cles, themes.
 
@@ -257,6 +467,10 @@ class DocsClient:
             position: position du nœud parmi ses frères (1-indexé)
             is_root: si True, le nœud racine est ignoré et ses enfants sont
                      numérotés à partir de 1 directement (Guide=1, Outils=2, etc.)
+            content_format: format de récupération du contenu —
+                'markdown' : texte markdown brut (peut échouer sur certains émojis)
+                'html'     : HTML converti en texte → meilleure compatibilité émojis
+                'auto'     : essaie markdown, bascule sur HTML si échec (défaut)
 
         Returns:
             list de dicts {"fields": {...}} pour l'API Grist
@@ -268,17 +482,18 @@ class DocsClient:
         niveau = node.get("depth", 1)
         path = node.get("path", "")
 
+        # Extraction de l'émoji de tête du titre (logique identique au frontend)
+        emoji, titre_propre = self.extract_emoji_from_title(titre)
+
         children = node.get("children", [])
         numchild = node.get("numchild", 0)
 
         # Le tree ne retourne pas toujours tous les enfants (children: [] malgré numchild > 0).
         # On les récupère via fetch_children_with_content qui remonte aussi le contenu,
         # évitant ainsi un appel get_markdown() supplémentaire par enfant.
-        children_content = {}
         if numchild > 0 and not children:
             try:
                 raw = self.fetch_children_with_content(doc_id)
-                children_content = {c["id"]: c.get("content_markdown", "") for c in raw}
                 children = [
                     {
                         "id": c["id"],
@@ -287,7 +502,10 @@ class DocsClient:
                         "path": "",
                         "numchild": 0,   # sera récupéré récursivement si besoin
                         "children": [],
-                        "_content": c.get("content_markdown", ""),
+                        # `or ""` : content_markdown peut être None si
+                        # fetch_children_with_content a capturé une erreur
+                        "_content": c.get("content_markdown") or "",
+                        "_content_format": "markdown" if not c.get("error") else "conversion_echec",
                     }
                     for c in raw
                 ]
@@ -300,7 +518,8 @@ class DocsClient:
             for i, child in enumerate(children, start=1):
                 records.extend(
                     self.flatten_tree(child, base_url,
-                                      parent_numero=None, position=i)
+                                      parent_numero=None, position=i,
+                                      content_format=content_format)
                 )
             return records
 
@@ -308,32 +527,62 @@ class DocsClient:
         numero = f"{parent_numero}.{position}" if parent_numero else str(position)
         url = f"{base_url.rstrip('/')}/docs/{doc_id}/"
 
-        print(f"  {'  ' * (niveau - 2)}[{numero}] {titre}")
+        emoji_indicator = f" {emoji}" if emoji else ""
+        print(f"  {'  ' * (niveau - 2)}[{numero}]{emoji_indicator} {titre_propre}")
 
-        # Le contenu peut avoir été pré-chargé par le parent via fetch_children_with_content
+        # ── Récupération du contenu ──────────────────────────────────────────
+        # Le contenu peut avoir été pré-chargé par le parent
         contenu = node.get("_content")
+        fmt_utilise = node.get("_content_format", "markdown")
+
         if contenu is None:
-            try:
-                contenu = self.get_markdown(doc_id)
-            except Exception as e:
-                print(f"  ⚠️  Contenu non récupéré pour {doc_id} ({titre}): {e}")
-                contenu = ""
+            if content_format == "markdown":
+                try:
+                    contenu = self.get_markdown(doc_id)
+                    fmt_utilise = "markdown"
+                except Exception as e:
+                    print(f"    ⚠️  Contenu non récupéré pour {doc_id}: {e}")
+                    contenu = ""
+                    fmt_utilise = "erreur"
+
+            elif content_format == "html":
+                try:
+                    html = self.get_html(doc_id)
+                    contenu = self.html_to_text(html)
+                    fmt_utilise = "html"
+                except Exception as e:
+                    print(f"    ⚠️  Contenu HTML non récupéré pour {doc_id}: {e}")
+                    contenu = ""
+                    fmt_utilise = "erreur"
+
+            else:  # "auto" : markdown puis HTML en fallback
+                contenu, fmt_utilise = self.get_markdown_with_emoji_fallback(doc_id)
+
+        contenu = self.strip_code_blocks(contenu)
+
+        n_emojis = self.count_emojis(contenu)
+        if n_emojis:
+            print(f"    ✓ {n_emojis} émoji(s) dans le contenu [{fmt_utilise}]")
 
         records.append({
             "fields": {
                 "titre": titre,
+                "emoji": emoji or "",
+                "titre_propre": titre_propre,
                 "niveau": niveau - 1,
                 "ordre": ordre,
                 "numero": numero,
                 "url": url,
                 "contenu": contenu,
+                "contenu_format": fmt_utilise,
             }
         })
 
         for i, child in enumerate(children, start=1):
             records.extend(
                 self.flatten_tree(child, base_url,
-                                  parent_numero=numero, position=i)
+                                  parent_numero=numero, position=i,
+                                  content_format=content_format)
             )
 
         return records
