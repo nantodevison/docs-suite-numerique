@@ -255,6 +255,50 @@ class DocsClient:
                 results[f"{fmt}_error"] = str(exc)
         return results
 
+    def get_json_blocks(self, doc_id: str) -> list[dict]:
+        """Récupère le contenu d'un document en JSON BlockNote (tableau de blocs).
+
+        Contrairement à content_format=markdown, ce format retourne la structure
+        brute des blocs *avant* sérialisation par le Y-Provider — les blocs custom
+        (callout, etc.) sont présents avec leur type et props réels.
+
+        Returns:
+            list de blocs BlockNote (chacun avec id, type, props, content, children)
+        """
+        data = self.get_content(doc_id, "json")
+        content = data.get("content")
+        if not content:
+            return []
+        if isinstance(content, list):
+            return content
+        # Fallback : si l'API renvoie une chaîne JSON (ne devrait pas arriver)
+        import json as _json
+        try:
+            parsed = _json.loads(content)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:  # noqa: BLE001
+            return []
+
+    def get_markdown_from_json(self, doc_id: str) -> tuple[str, str]:
+        """Récupère le contenu via JSON BlockNote et le convertit en markdown standard.
+
+        Avantages par rapport à content_format=markdown :
+        — Les blocs custom (callout, etc.) sont rendus correctement.
+        — Aucune perte de contenu liée à un schéma BlockNote non supporté
+          par le Y-Provider (ex: callout → blockquote, inline custom → texte brut).
+
+        Returns:
+            tuple(str, str): (contenu_markdown, format_utilisé)
+                format_utilisé vaut 'json→md' ou 'erreur'
+        """
+        try:
+            blocks = self.get_json_blocks(doc_id)
+            md = self.blocknote_to_markdown(blocks)
+            return md, "json→md"
+        except Exception as exc:  # noqa: BLE001
+            print(f"    ↳ JSON→MD KO ({exc!s})")
+            return "", "erreur"
+
     # ──────────────────────────────────────────────
     #  UTILITAIRES STATIQUES
     # ──────────────────────────────────────────────
@@ -332,6 +376,143 @@ class DocsClient:
             re.DOTALL | re.IGNORECASE,
         )
         return targeted_re.sub('[bloc de code supprimé]', text)
+
+    # ──────────────────────────────────────────────
+    #  CONVERTISSEUR BLOCKNOTE JSON → MARKDOWN
+    # ──────────────────────────────────────────────
+
+    @staticmethod
+    def _render_inline(inline_items: list) -> str:
+        """Convertit une liste d'inline content BlockNote en texte markdown."""
+        parts = []
+        for item in (inline_items or []):
+            itype = item.get("type", "text")
+            if itype == "text":
+                text = item.get("text", "")
+                styles = item.get("styles", {})
+                # Code : ne pas combiner avec bold/italic
+                if styles.get("code"):
+                    parts.append(f"`{text}`")
+                    continue
+                if styles.get("bold") and styles.get("italic"):
+                    text = f"***{text}***"
+                elif styles.get("bold"):
+                    text = f"**{text}**"
+                elif styles.get("italic"):
+                    text = f"*{text}*"
+                if styles.get("strikethrough"):
+                    text = f"~~{text}~~"
+                parts.append(text)
+            elif itype == "link":
+                link_text = DocsClient._render_inline(item.get("content", []))
+                href = item.get("href", "")
+                parts.append(f"[{link_text}]({href})")
+            else:
+                # Inline custom inconnu (mention, etc.) — extraction best-effort
+                sub = item.get("content", [])
+                if isinstance(sub, list):
+                    parts.append(DocsClient._render_inline(sub))
+                elif item.get("text"):
+                    parts.append(str(item["text"]))
+        return "".join(parts)
+
+    @staticmethod
+    def _render_block(block: dict, indent: int = 0) -> str:
+        """Convertit un bloc BlockNote en markdown (récursif pour les enfants)."""
+        btype = block.get("type", "paragraph")
+        props = block.get("props", {})
+        content = block.get("content", [])
+        children = block.get("children", [])
+
+        pad = "  " * indent
+
+        # Texte inline du bloc courant
+        inline = DocsClient._render_inline(content) if isinstance(content, list) else ""
+
+        # Enfants (listes imbriquées, etc.)
+        child_lines = [DocsClient._render_block(ch, indent + 1) for ch in children]
+        children_str = ("\n" + "\n".join(child_lines)) if child_lines else ""
+
+        if btype == "heading":
+            level = min(max(int(props.get("level", 1)), 1), 6)
+            return f"{pad}{'#' * level} {inline}{children_str}"
+
+        elif btype == "bulletListItem":
+            return f"{pad}* {inline}{children_str}"
+
+        elif btype == "numberedListItem":
+            return f"{pad}1. {inline}{children_str}"
+
+        elif btype == "checkListItem":
+            box = "x" if props.get("checked") else " "
+            return f"{pad}- [{box}] {inline}{children_str}"
+
+        elif btype == "codeBlock":
+            lang = props.get("language", "")
+            return f"{pad}```{lang}\n{inline}\n{pad}```{children_str}"
+
+        elif btype == "callout":
+            # Rendu en blockquote markdown avec l'émoji en préfixe de la première ligne
+            emoji = props.get("emoji", "")
+            prefix = f"{emoji} " if emoji else ""
+            bq_lines = []
+            for i, line in enumerate(inline.split("\n")):
+                bq_lines.append(f"{pad}> {prefix if i == 0 else ''}{line}")
+            for line in child_lines:
+                bq_lines.append(f"{pad}> {line}")
+            return "\n".join(bq_lines)
+
+        elif btype == "image":
+            url = props.get("url", "")
+            cap_raw = props.get("caption", [])
+            caption = (DocsClient._render_inline(cap_raw)
+                       if isinstance(cap_raw, list) else str(cap_raw or ""))
+            if url:
+                return f"{pad}![{caption}]({url}){children_str}"
+            return f"{pad}[image{': ' + caption if caption else ''}]{children_str}"
+
+        elif btype == "table":
+            rows = content if isinstance(content, list) else []
+            rendered_rows = []
+            for row in rows:
+                cells = row.get("content", []) if isinstance(row, dict) else []
+                cell_texts = [
+                    DocsClient._render_inline(
+                        cell.get("content", []) if isinstance(cell, dict) else []
+                    )
+                    for cell in cells
+                ]
+                rendered_rows.append("| " + " | ".join(cell_texts) + " |")
+            if not rendered_rows:
+                return ""
+            n_cols = max(r.count("|") - 1 for r in rendered_rows)
+            separator = "| " + " | ".join(["---"] * max(n_cols, 1)) + " |"
+            return "\n".join([rendered_rows[0], separator] + rendered_rows[1:])
+
+        else:
+            # paragraph ou bloc custom inconnu — extraction best-effort
+            return f"{pad}{inline}{children_str}" if (inline or children_str) else ""
+
+    @staticmethod
+    def blocknote_to_markdown(blocks: list[dict]) -> str:
+        """Convertit une liste de blocs BlockNote JSON en markdown standard.
+
+        Gère les blocs natifs BlockNote (heading, paragraph, bulletListItem,
+        numberedListItem, checkListItem, codeBlock, image, table) et les blocs
+        custom de Docs (callout → blockquote avec émoji).
+        Les blocs et inline contents inconnus ont leur texte extrait en best-effort.
+
+        Args:
+            blocks: liste de blocs BlockNote (retournée par get_json_blocks())
+
+        Returns:
+            str: contenu markdown
+        """
+        if not blocks:
+            return ""
+        rendered = [DocsClient._render_block(b) for b in blocks]
+        result = "\n\n".join(r for r in rendered if r)
+        return re.sub(r"\n{3,}", "\n\n", result).strip()
 
     # ──────────────────────────────────────────────
     #  LISTE DES SOUS-DOCUMENTS (ENFANTS)
@@ -418,12 +599,20 @@ class DocsClient:
             "updated_at": metadata.get("updated_at"),
         }
 
-    def fetch_children_with_content(self, parent_url_or_id):
+    def fetch_children_with_content(self, parent_url_or_id,
+                                    content_format: str = "markdown"):
         """
-        Récupère tous les enfants d'un doc parent avec leur contenu markdown.
+        Récupère tous les enfants d'un doc parent avec leur contenu.
+
+        Args:
+            parent_url_or_id: URL ou UUID du document parent
+            content_format: format de récupération du contenu —
+                'json'     : JSON BlockNote → markdown (recommandé, préserve les callouts)
+                'markdown' : markdown brut depuis le Y-Provider
+                'html'     : HTML converti en texte
 
         Returns:
-            list de dicts avec id, title, content_markdown, ...
+            list de dicts avec id, title, content_markdown, content_format, ...
         """
         parent_id = self.extract_doc_id(parent_url_or_id)
         if not parent_id:
@@ -434,12 +623,24 @@ class DocsClient:
         for child in children:
             child_id = child["id"]
             try:
-                content_data = self.get_content(child_id, "markdown")
-                # `or ""` gère le cas {"content": null} (document jamais édité)
+                if content_format == "json":
+                    blocks = self.get_json_blocks(child_id)
+                    content_md = self.blocknote_to_markdown(blocks)
+                    fmt = "json→md"
+                elif content_format == "html":
+                    html = self.get_html(child_id)
+                    content_md = self.html_to_text(html)
+                    fmt = "html"
+                else:  # "markdown" ou "auto"
+                    content_data = self.get_content(child_id, "markdown")
+                    # `or ""` gère le cas {"content": null} (document jamais édité)
+                    content_md = content_data.get("content") or ""
+                    fmt = "markdown"
                 results.append({
                     "id": child_id,
                     "title": child.get("title", ""),
-                    "content_markdown": content_data.get("content") or "",
+                    "content_markdown": content_md,
+                    "content_format": fmt,
                     "created_at": child.get("created_at"),
                     "updated_at": child.get("updated_at"),
                 })
@@ -471,7 +672,7 @@ class DocsClient:
     def flatten_tree(self, node: dict, base_url: str,
                      parent_numero: str | None = None, position: int = 1,
                      is_root: bool = False,
-                     content_format: str = "auto") -> list[dict]:
+                     content_format: str = "json") -> list[dict]:
         """
         Parcourt récursivement le tree retourné par get_tree() et retourne
         une liste de records prêts à être insérés dans Grist.
@@ -489,9 +690,10 @@ class DocsClient:
             is_root: si True, le nœud racine est ignoré et ses enfants sont
                      numérotés à partir de 1 directement (Guide=1, Outils=2, etc.)
             content_format: format de récupération du contenu —
-                'markdown' : texte markdown brut (peut échouer sur certains émojis)
+                'json'     : JSON BlockNote → markdown (défaut, préserve callouts et blocs custom)
+                'markdown' : texte markdown brut (peut échouer sur certains blocs custom)
                 'html'     : HTML converti en texte → meilleure compatibilité émojis
-                'auto'     : essaie markdown, bascule sur HTML si échec (défaut)
+                'auto'     : essaie markdown, bascule sur HTML si échec
 
         Returns:
             list de dicts {"fields": {...}} pour l'API Grist
@@ -514,7 +716,7 @@ class DocsClient:
         # évitant ainsi un appel get_markdown() supplémentaire par enfant.
         if numchild > 0 and not children:
             try:
-                raw = self.fetch_children_with_content(doc_id)
+                raw = self.fetch_children_with_content(doc_id, content_format=content_format)
                 children = [
                     {
                         "id": c["id"],
@@ -526,7 +728,8 @@ class DocsClient:
                         # `or ""` : content_markdown peut être None si
                         # fetch_children_with_content a capturé une erreur
                         "_content": c.get("content_markdown") or "",
-                        "_content_format": "markdown" if not c.get("error") else "conversion_echec",
+                        "_content_format": (c.get("content_format", "markdown")
+                                            if not c.get("error") else "conversion_echec"),
                     }
                     for c in raw
                 ]
@@ -557,7 +760,17 @@ class DocsClient:
         fmt_utilise = node.get("_content_format", "markdown")
 
         if contenu is None:
-            if content_format == "markdown":
+            if content_format == "json":
+                try:
+                    blocks = self.get_json_blocks(doc_id)
+                    contenu = self.blocknote_to_markdown(blocks)
+                    fmt_utilise = "json→md"
+                except Exception as e:
+                    print(f"    ⚠️  Contenu JSON non récupéré pour {doc_id}: {e}")
+                    contenu = ""
+                    fmt_utilise = "erreur"
+
+            elif content_format == "markdown":
                 try:
                     contenu = self.get_markdown(doc_id)
                     fmt_utilise = "markdown"
