@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """Client pour l'API Docs (Suite Numérique)."""
 
+import base64 as _base64
 import re
 from html.parser import HTMLParser
+from mimetypes import guess_type as _guess_type
 from urllib.parse import urlparse
 
 import requests
@@ -93,13 +95,21 @@ class _HTMLTextExtractor(HTMLParser):
 class DocsClient:
     """Client pour interagir avec l'API Docs."""
 
-    def __init__(self, base_url, token=None, session_id=None, csrf_token=None):
+    def __init__(self, base_url, token=None, session_id=None, csrf_token=None,
+                 github_token=None, github_repo="nantodevison/docs-suite-numerique",
+                 github_images_branch="master", github_images_folder="images"):
         """
         Args:
             base_url: URL de base de l'instance Docs (ex: https://docs.numerique.gouv.fr)
             token: Token OIDC Bearer (optionnel pour les documents publics)
             session_id: Cookie de session (authentification par cookie)
             csrf_token: Valeur du header X-Csrftoken (requis avec session_id)
+            github_token: PAT GitHub avec scope contents:write (optionnel).
+                Si fourni, embed_internal_images() utilisera GitHub comme hôte
+                d'images plutôt que le base64 (moins volumineux, URL stable).
+            github_repo: Repo GitHub cible, format 'owner/repo'.
+            github_images_branch: Branche où stocker les images.
+            github_images_folder: Dossier dans le repo (ex: 'images').
         """
         self.base_url = base_url.rstrip("/")
         self.api_url = f"{self.base_url}/api/v1.0"
@@ -111,6 +121,11 @@ class DocsClient:
         if csrf_token:
             self.session.headers["X-Csrftoken"] = csrf_token
         self.session.headers["Accept"] = "application/json"
+        # GitHub image hosting
+        self._github_token = github_token
+        self._github_repo = github_repo
+        self._github_images_branch = github_images_branch
+        self._github_images_folder = github_images_folder.strip("/")
 
     # ──────────────────────────────────────────────
     #  EXTRACTION D'ID DEPUIS UNE URL
@@ -305,6 +320,7 @@ class DocsClient:
                 print(f"    ⚠️  {n_lost} référence(s) interne(s) non résolue(s) "
                       f"(placeholder '[référence interne]' inséré)")
             md = self.blocknote_to_markdown(blocks)
+            md = self.embed_internal_images(md)
             return md, "json→md"
         except Exception as exc:  # noqa: BLE001
             print(f"    ↳ JSON→MD KO ({exc!s})")
@@ -313,6 +329,131 @@ class DocsClient:
     # ──────────────────────────────────────────────
     #  UTILITAIRES STATIQUES
     # ──────────────────────────────────────────────
+
+    def _fetch_as_data_uri(self, url: str) -> str | None:
+        """Télécharge une image via la session authentifiée et retourne une data URI.
+
+        Utilisé pour embarquer les images internes Docs (stockées sous /media/…)
+        en base64, afin qu'elles soient autonomes sans session active (ex: Grist).
+
+        Returns:
+            str data URI ("data:image/png;base64,…") ou None si échec.
+        """
+        try:
+            resp = self.session.get(url, timeout=15)
+            resp.raise_for_status()
+            mime = resp.headers.get("Content-Type", "").split(";")[0].strip()
+            if not mime or not mime.startswith("image/"):
+                guessed, _ = _guess_type(url)
+                mime = guessed or "image/png"
+            b64 = _base64.b64encode(resp.content).decode("ascii")
+            return f"data:{mime};base64,{b64}"
+        except Exception as exc:  # noqa: BLE001
+            print(f"    ⚠️  Image non téléchargeable ({url}): {exc}")
+            return None
+
+    def _ensure_image_in_github(self, url: str) -> str | None:
+        """Upload une image interne Docs dans le repo GitHub et retourne sa raw URL.
+
+        L'UUID de la pièce jointe Docs est utilisé comme nom de fichier, ce qui
+        garantit la déduplication : si l'image est déjà présente dans le repo,
+        elle n'est pas ré-uploadée.
+
+        Returns:
+            Raw GitHub URL (https://raw.githubusercontent.com/…) ou None si échec.
+        """
+        if not self._github_token:
+            return None
+
+        # Extrait l'UUID de la pièce jointe depuis l'URL Docs
+        # Format : /media/{doc_id}/attachments/{attachment_uuid}.{ext}
+        m = re.search(r'/attachments/([\w-]+)(\.[a-zA-Z0-9]+)?$', url)
+        if not m:
+            print(f"    ⚠️  Impossible d'extraire l'UUID de l'image ({url})")
+            return None
+        attachment_uuid = m.group(1)
+        ext = m.group(2) or ""
+        path_in_repo = f"{self._github_images_folder}/{attachment_uuid}{ext}"
+
+        gh_api = f"https://api.github.com/repos/{self._github_repo}/contents/{path_in_repo}"
+        gh_headers = {
+            "Authorization": f"Bearer {self._github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        # Vérifie si le fichier existe déjà (déduplication)
+        check = requests.get(gh_api, headers=gh_headers, timeout=10)
+        if check.status_code == 200:
+            # Déjà présent — retourne directement la raw URL
+            raw_url = (f"https://raw.githubusercontent.com/{self._github_repo}"
+                       f"/{self._github_images_branch}/{path_in_repo}")
+            return raw_url
+
+        # Télécharge depuis Docs (session authentifiée)
+        try:
+            resp = self.session.get(url, timeout=15)
+            resp.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            print(f"    ⚠️  Image non téléchargeable depuis Docs ({url}): {exc}")
+            return None
+
+        # Upload vers GitHub
+        content_b64 = _base64.b64encode(resp.content).decode("ascii")
+        payload = {
+            "message": f"chore: add Docs attachment {attachment_uuid}",
+            "content": content_b64,
+            "branch": self._github_images_branch,
+        }
+        try:
+            put = requests.put(gh_api, headers=gh_headers, json=payload, timeout=30)
+            put.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            print(f"    ⚠️  Upload GitHub échoué ({path_in_repo}): {exc}")
+            return None
+
+        raw_url = (f"https://raw.githubusercontent.com/{self._github_repo}"
+                   f"/{self._github_images_branch}/{path_in_repo}")
+        return raw_url
+
+    def embed_internal_images(self, text: str, strategy: str = "auto") -> str:
+        """Remplace les URLs d'images internes Docs par des URLs autonomes.
+
+        Les pièces jointes uploadées dans Docs nécessitent une authentification.
+        Cette méthode les rend accessibles sans session via deux stratégies :
+
+        Args:
+            strategy:
+                'auto'   : GitHub si github_token configuré, sinon base64
+                'github' : stocke dans le repo GitHub, retourne une raw URL
+                'base64' : embarque en data URI base64 (autonome, mais volumineux)
+
+        Seules les URLs internes (sous self.base_url/media/) sont traitées.
+        Les images externes sont conservées telles quelles.
+        """
+        use_github = (strategy == "github" or
+                      (strategy == "auto" and bool(self._github_token)))
+
+        base = re.escape(self.base_url)
+        _md_re = re.compile(r'!\[([^\]]*)\]\((' + base + r'/media/[^)\s]+)\)')
+        _html_re = re.compile(r'(<img[^>]+src=")(' + base + r'/media/[^"]+)(")')
+
+        def _resolve(url: str) -> str | None:
+            if use_github:
+                return self._ensure_image_in_github(url)
+            return self._fetch_as_data_uri(url)
+
+        def _replace_md(m: re.Match) -> str:
+            resolved = _resolve(m.group(2))
+            return f"![{m.group(1)}]({resolved})" if resolved else m.group(0)
+
+        def _replace_html(m: re.Match) -> str:
+            resolved = _resolve(m.group(2))
+            return f"{m.group(1)}{resolved}{m.group(3)}" if resolved else m.group(0)
+
+        text = _md_re.sub(_replace_md, text)
+        text = _html_re.sub(_replace_html, text)
+        return text
 
     @staticmethod
     def html_to_text(html_content: str) -> str:
@@ -777,7 +918,7 @@ class DocsClient:
             try:
                 if content_format == "json":
                     blocks = self.get_json_blocks(child_id)
-                    content_md = self.blocknote_to_markdown(blocks)
+                    content_md = self.embed_internal_images(self.blocknote_to_markdown(blocks))
                     fmt = "json→md"
                 elif content_format == "html":
                     html = self.get_html(child_id)
@@ -915,7 +1056,7 @@ class DocsClient:
             if content_format == "json":
                 try:
                     blocks = self.get_json_blocks(doc_id)
-                    contenu = self.blocknote_to_markdown(blocks)
+                    contenu = self.embed_internal_images(self.blocknote_to_markdown(blocks))
                     fmt_utilise = "json→md"
                 except Exception as e:
                     print(f"    ⚠️  Contenu JSON non récupéré pour {doc_id}: {e}")
