@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """Client pour l'API Docs (Suite Numérique)."""
 
+import base64 as _base64
 import re
 from html.parser import HTMLParser
+from mimetypes import guess_type as _guess_type
 from urllib.parse import urlparse
 
 import requests
@@ -40,6 +42,13 @@ _EMOJI_RE = re.compile(
 # Supprime les blocs ``` … ``` (SQL, Python, bash…) pour éviter les faux
 # positifs WAF (Incapsula bloque les POST contenant du SQL notamment).
 _CODE_BLOCK_RE = re.compile(r'```[^\n]*\n.*?```', re.DOTALL)
+
+# Langages SQL à neutraliser avant envoi vers Grist (le WAF Incapsula bloque
+# les POST contenant du code SQL).
+WAF_SQL_LANGUAGES: list[str] = [
+    'sql', 'postgresql', 'postgres', 'psql', 'plpgsql',
+    'mysql', 'sqlite', 'tsql', 'mariadb',
+]
 
 
 # ──────────────────────────────────────────────
@@ -86,13 +95,21 @@ class _HTMLTextExtractor(HTMLParser):
 class DocsClient:
     """Client pour interagir avec l'API Docs."""
 
-    def __init__(self, base_url, token=None, session_id=None, csrf_token=None):
+    def __init__(self, base_url, token=None, session_id=None, csrf_token=None,
+                 github_token=None, github_repo="nantodevison/docs-suite-numerique",
+                 github_images_branch="master", github_images_folder="images"):
         """
         Args:
             base_url: URL de base de l'instance Docs (ex: https://docs.numerique.gouv.fr)
             token: Token OIDC Bearer (optionnel pour les documents publics)
             session_id: Cookie de session (authentification par cookie)
             csrf_token: Valeur du header X-Csrftoken (requis avec session_id)
+            github_token: PAT GitHub avec scope contents:write (optionnel).
+                Si fourni, embed_internal_images() utilisera GitHub comme hôte
+                d'images plutôt que le base64 (moins volumineux, URL stable).
+            github_repo: Repo GitHub cible, format 'owner/repo'.
+            github_images_branch: Branche où stocker les images.
+            github_images_folder: Dossier dans le repo (ex: 'images').
         """
         self.base_url = base_url.rstrip("/")
         self.api_url = f"{self.base_url}/api/v1.0"
@@ -104,6 +121,11 @@ class DocsClient:
         if csrf_token:
             self.session.headers["X-Csrftoken"] = csrf_token
         self.session.headers["Accept"] = "application/json"
+        # GitHub image hosting
+        self._github_token = github_token
+        self._github_repo = github_repo
+        self._github_images_branch = github_images_branch
+        self._github_images_folder = github_images_folder.strip("/")
 
     # ──────────────────────────────────────────────
     #  EXTRACTION D'ID DEPUIS UNE URL
@@ -255,9 +277,183 @@ class DocsClient:
                 results[f"{fmt}_error"] = str(exc)
         return results
 
+    def get_json_blocks(self, doc_id: str) -> list[dict]:
+        """Récupère le contenu d'un document en JSON BlockNote (tableau de blocs).
+
+        Contrairement à content_format=markdown, ce format retourne la structure
+        brute des blocs *avant* sérialisation par le Y-Provider — les blocs custom
+        (callout, etc.) sont présents avec leur type et props réels.
+
+        Returns:
+            list de blocs BlockNote (chacun avec id, type, props, content, children)
+        """
+        data = self.get_content(doc_id, "json")
+        content = data.get("content")
+        if not content:
+            return []
+        if isinstance(content, list):
+            return content
+        # Fallback : si l'API renvoie une chaîne JSON (ne devrait pas arriver)
+        import json as _json
+        try:
+            parsed = _json.loads(content)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:  # noqa: BLE001
+            return []
+
+    def get_markdown_from_json(self, doc_id: str) -> tuple[str, str]:
+        """Récupère le contenu via JSON BlockNote et le convertit en markdown standard.
+
+        Avantages par rapport à content_format=markdown :
+        — Les blocs custom (callout, etc.) sont rendus correctement.
+        — Aucune perte de contenu liée à un schéma BlockNote non supporté
+          par le Y-Provider (ex: callout → blockquote, inline custom → texte brut).
+
+        Returns:
+            tuple(str, str): (contenu_markdown, format_utilisé)
+                format_utilisé vaut 'json→md' ou 'erreur'
+        """
+        try:
+            blocks = self.get_json_blocks(doc_id)
+            n_lost = self._count_internal_refs_lost(blocks)
+            if n_lost:
+                print(f"    ⚠️  {n_lost} référence(s) interne(s) non résolue(s) "
+                      f"(placeholder '[référence interne]' inséré)")
+            md = self.blocknote_to_markdown(blocks)
+            md = self.embed_internal_images(md)
+            return md, "json→md"
+        except Exception as exc:  # noqa: BLE001
+            print(f"    ↳ JSON→MD KO ({exc!s})")
+            return "", "erreur"
+
     # ──────────────────────────────────────────────
     #  UTILITAIRES STATIQUES
     # ──────────────────────────────────────────────
+
+    def _fetch_as_data_uri(self, url: str) -> str | None:
+        """Télécharge une image via la session authentifiée et retourne une data URI.
+
+        Utilisé pour embarquer les images internes Docs (stockées sous /media/…)
+        en base64, afin qu'elles soient autonomes sans session active (ex: Grist).
+
+        Returns:
+            str data URI ("data:image/png;base64,…") ou None si échec.
+        """
+        try:
+            resp = self.session.get(url, timeout=15)
+            resp.raise_for_status()
+            mime = resp.headers.get("Content-Type", "").split(";")[0].strip()
+            if not mime or not mime.startswith("image/"):
+                guessed, _ = _guess_type(url)
+                mime = guessed or "image/png"
+            b64 = _base64.b64encode(resp.content).decode("ascii")
+            return f"data:{mime};base64,{b64}"
+        except Exception as exc:  # noqa: BLE001
+            print(f"    ⚠️  Image non téléchargeable ({url}): {exc}")
+            return None
+
+    def _ensure_image_in_github(self, url: str) -> str | None:
+        """Upload une image interne Docs dans le repo GitHub et retourne sa raw URL.
+
+        L'UUID de la pièce jointe Docs est utilisé comme nom de fichier, ce qui
+        garantit la déduplication : si l'image est déjà présente dans le repo,
+        elle n'est pas ré-uploadée.
+
+        Returns:
+            Raw GitHub URL (https://raw.githubusercontent.com/…) ou None si échec.
+        """
+        if not self._github_token:
+            return None
+
+        # Extrait l'UUID de la pièce jointe depuis l'URL Docs
+        # Format : /media/{doc_id}/attachments/{attachment_uuid}.{ext}
+        m = re.search(r'/attachments/([\w-]+)(\.[a-zA-Z0-9]+)?$', url)
+        if not m:
+            print(f"    ⚠️  Impossible d'extraire l'UUID de l'image ({url})")
+            return None
+        attachment_uuid = m.group(1)
+        ext = m.group(2) or ""
+        path_in_repo = f"{self._github_images_folder}/{attachment_uuid}{ext}"
+
+        gh_api = f"https://api.github.com/repos/{self._github_repo}/contents/{path_in_repo}"
+        gh_headers = {
+            "Authorization": f"Bearer {self._github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        # Vérifie si le fichier existe déjà (déduplication)
+        check = requests.get(gh_api, headers=gh_headers, timeout=10)
+        if check.status_code == 200:
+            # Déjà présent — retourne directement la raw URL
+            raw_url = (f"https://raw.githubusercontent.com/{self._github_repo}"
+                       f"/{self._github_images_branch}/{path_in_repo}")
+            return raw_url
+
+        # Télécharge depuis Docs (session authentifiée)
+        try:
+            resp = self.session.get(url, timeout=15)
+            resp.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            print(f"    ⚠️  Image non téléchargeable depuis Docs ({url}): {exc}")
+            return None
+
+        # Upload vers GitHub
+        content_b64 = _base64.b64encode(resp.content).decode("ascii")
+        payload = {
+            "message": f"chore: add Docs attachment {attachment_uuid}",
+            "content": content_b64,
+            "branch": self._github_images_branch,
+        }
+        try:
+            put = requests.put(gh_api, headers=gh_headers, json=payload, timeout=30)
+            put.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            print(f"    ⚠️  Upload GitHub échoué ({path_in_repo}): {exc}")
+            return None
+
+        raw_url = (f"https://raw.githubusercontent.com/{self._github_repo}"
+                   f"/{self._github_images_branch}/{path_in_repo}")
+        return raw_url
+
+    def embed_internal_images(self, text: str, strategy: str = "auto") -> str:
+        """Remplace les URLs d'images internes Docs par des URLs autonomes.
+
+        Les pièces jointes uploadées dans Docs nécessitent une authentification.
+        Cette méthode les rend accessibles sans session via deux stratégies :
+
+        Args:
+            strategy:
+                'auto'   : GitHub si github_token configuré, sinon base64
+                'github' : stocke dans le repo GitHub, retourne une raw URL
+                'base64' : embarque en data URI base64 (autonome, mais volumineux)
+
+        Seules les URLs internes (sous self.base_url/media/) sont traitées.
+        Les images externes sont conservées telles quelles.
+        """
+        use_github = (strategy == "github" or
+                      (strategy == "auto" and bool(self._github_token)))
+
+        base = re.escape(self.base_url)
+        _md_re = re.compile(r'!\[([^\]]*)\]\((' + base + r'/media/[^)\s]+)\)')
+        _html_re = re.compile(r'(<img[^>]+src=")(' + base + r'/media/[^"]+)(")')
+
+        def _resolve(url: str) -> str | None:
+            if use_github:
+                return self._ensure_image_in_github(url)
+            return self._fetch_as_data_uri(url)
+
+        def _replace_md(m: re.Match) -> str:
+            resolved = _resolve(m.group(2))
+            return f"![{m.group(1)}]({resolved})" if resolved else m.group(0)
+
+        def _replace_html(m: re.Match) -> str:
+            resolved = _resolve(m.group(2))
+            return f"{m.group(1)}{resolved}{m.group(3)}" if resolved else m.group(0)
+
+        text = _md_re.sub(_replace_md, text)
+        text = _html_re.sub(_replace_html, text)
+        return text
 
     @staticmethod
     def html_to_text(html_content: str) -> str:
@@ -332,6 +528,284 @@ class DocsClient:
             re.DOTALL | re.IGNORECASE,
         )
         return targeted_re.sub('[bloc de code supprimé]', text)
+
+    @staticmethod
+    def sanitize_for_waf(text: str) -> str:
+        """Supprime les blocs de code SQL du markdown pour éviter les blocages WAF.
+
+        Le WAF Incapsula bloque les POST contenant du SQL. Cette méthode applique
+        `strip_code_blocks` avec la liste `WAF_SQL_LANGUAGES` définie au niveau
+        module — les autres langages (Python, bash, etc.) sont conservés.
+        """
+        return DocsClient.strip_code_blocks(text, languages=WAF_SQL_LANGUAGES)
+
+    @staticmethod
+    def _count_internal_refs_lost(blocks: list[dict]) -> int:
+        """Compte récursivement les éléments de liste dont le contenu est vide.
+
+        Un élément de liste à contenu vide (content: []) indique qu'une
+        référence interne Docs (@mention) était présente mais a été supprimée
+        silencieusement par le Y-Provider lors de la sérialisation JSON.
+        Ces éléments sont rendus par _render_block avec le placeholder
+        '[référence interne]'.
+
+        Returns:
+            Nombre d'éléments affectés.
+        """
+        count = 0
+        for b in blocks:
+            btype = b.get("type", "")
+            if btype in ("bulletListItem", "numberedListItem", "checkListItem"):
+                content = b.get("content", [])
+                if isinstance(content, list):
+                    has_text = any(
+                        i.get("type") == "text" and i.get("text", "").strip()
+                        for i in content
+                    )
+                    has_link = any(i.get("type") == "link" for i in content)
+                    if not has_text and not has_link and not b.get("children"):
+                        count += 1
+            count += DocsClient._count_internal_refs_lost(b.get("children", []))
+        return count
+
+    # ──────────────────────────────────────────────
+    #  CONVERTISSEUR BLOCKNOTE JSON → MARKDOWN
+    # ──────────────────────────────────────────────
+
+    @staticmethod
+    def _render_inline(inline_items: list) -> str:
+        """Convertit une liste d'inline content BlockNote en texte markdown."""
+        parts = []
+        for item in (inline_items or []):
+            itype = item.get("type", "text")
+            if itype == "text":
+                text = item.get("text", "")
+                styles = item.get("styles", {})
+                # Code : ne pas combiner avec bold/italic
+                if styles.get("code"):
+                    parts.append(f"`{text}`")
+                    continue
+                if styles.get("bold") and styles.get("italic"):
+                    text = f"***{text}***"
+                elif styles.get("bold"):
+                    text = f"**{text}**"
+                elif styles.get("italic"):
+                    text = f"*{text}*"
+                if styles.get("strikethrough"):
+                    text = f"~~{text}~~"
+                parts.append(text)
+            elif itype == "link":
+                link_text = DocsClient._render_inline(item.get("content", []))
+                href = item.get("href", "")
+                if not link_text:
+                    # Lien interne Docs : le titre est résolu dynamiquement par
+                    # le frontend — le JSON ne contient pas de texte visible.
+                    # Fallback : on affiche l'URL brute.
+                    link_text = href
+                parts.append(f"[{link_text}]({href})")
+            else:
+                # Inline custom inconnu (mention, etc.) — extraction best-effort
+                # Priorité : content récursif → text → props (strings) → attrs
+                sub = item.get("content", [])
+                if isinstance(sub, list) and sub:
+                    parts.append(DocsClient._render_inline(sub))
+                elif isinstance(sub, str) and sub:
+                    parts.append(sub)
+                elif item.get("text"):
+                    parts.append(str(item["text"]))
+                else:
+                    # Dernier recours : valeurs string non-vides des props
+                    # (couvre les mentions, références internes, etc.)
+                    props = item.get("props", {})
+                    prop_texts = [
+                        str(v) for v in props.values()
+                        if isinstance(v, str) and v
+                    ]
+                    if prop_texts:
+                        parts.append(" ".join(prop_texts))
+        return "".join(parts)
+
+    @staticmethod
+    def _render_inline_html(inline_items: list) -> str:
+        """Convertit une liste d'inline content BlockNote en HTML.
+
+        Utilisé pour les cellules de tableaux avec rowspan/colspan, où le
+        Markdown pipe table ne peut pas représenter les fusions.
+        """
+        parts = []
+        for item in (inline_items or []):
+            itype = item.get("type", "text")
+            if itype == "text":
+                text = item.get("text", "")
+                styles = item.get("styles", {})
+                if styles.get("code"):
+                    parts.append(f"<code>{text}</code>")
+                    continue
+                if styles.get("bold") and styles.get("italic"):
+                    text = f"<strong><em>{text}</em></strong>"
+                elif styles.get("bold"):
+                    text = f"<strong>{text}</strong>"
+                elif styles.get("italic"):
+                    text = f"<em>{text}</em>"
+                if styles.get("strikethrough"):
+                    text = f"<del>{text}</del>"
+                parts.append(text)
+            elif itype == "link":
+                link_html = DocsClient._render_inline_html(item.get("content", []))
+                href = item.get("href", "")
+                if not link_html:
+                    link_html = href
+                parts.append(f'<a href="{href}">{link_html}</a>')
+            else:
+                sub = item.get("content", [])
+                if isinstance(sub, list) and sub:
+                    parts.append(DocsClient._render_inline_html(sub))
+                elif item.get("text"):
+                    parts.append(str(item["text"]))
+        return "".join(parts)
+
+    @staticmethod
+    def _render_block(block: dict, indent: int = 0) -> str:
+        """Convertit un bloc BlockNote en markdown (récursif pour les enfants)."""
+        btype = block.get("type", "paragraph")
+        props = block.get("props", {})
+        content = block.get("content", [])
+        children = block.get("children", [])
+
+        pad = "  " * indent
+
+        # Texte inline du bloc courant
+        inline = DocsClient._render_inline(content) if isinstance(content, list) else ""
+
+        # Enfants (listes imbriquées, etc.) — on filtre les rendus vides
+        child_lines = [r for r in
+                       (DocsClient._render_block(ch, indent + 1) for ch in children)
+                       if r]
+        children_str = ("\n" + "\n".join(child_lines)) if child_lines else ""
+
+        if btype == "heading":
+            level = min(max(int(props.get("level", 1)), 1), 6)
+            return f"{pad}{'#' * level} {inline}{children_str}"
+
+        elif btype == "bulletListItem":
+            # Contenu vide : l'élément existait mais sa référence interne
+            # (@mention Docs) a été supprimée silencieusement par le Y-Provider.
+            display = inline if inline else "[référence interne]"
+            return f"{pad}* {display}{children_str}"
+
+        elif btype == "numberedListItem":
+            display = inline if inline else "[référence interne]"
+            return f"{pad}1. {display}{children_str}"
+
+        elif btype == "checkListItem":
+            box = "x" if props.get("checked") else " "
+            display = inline if inline else "[référence interne]"
+            return f"{pad}- [{box}] {display}{children_str}"
+
+        elif btype == "codeBlock":
+            lang = props.get("language", "")
+            return f"{pad}```{lang}\n{inline}\n{pad}```{children_str}"
+
+        elif btype == "callout":
+            # Rendu en blockquote markdown avec l'émoji en préfixe de la première ligne
+            emoji = props.get("emoji", "")
+            prefix = f"{emoji} " if emoji else ""
+            bq_lines = []
+            for i, line in enumerate(inline.split("\n")):
+                bq_lines.append(f"{pad}> {prefix if i == 0 else ''}{line}")
+            for line in child_lines:
+                bq_lines.append(f"{pad}> {line}")
+            return "\n".join(bq_lines)
+
+        elif btype == "image":
+            url = props.get("url", "")
+            cap_raw = props.get("caption", [])
+            caption = (DocsClient._render_inline(cap_raw)
+                       if isinstance(cap_raw, list) else str(cap_raw or ""))
+            if url:
+                return f"{pad}![{caption}]({url}){children_str}"
+            return f"{pad}[image{': ' + caption if caption else ''}]{children_str}"
+
+        elif btype == "table":
+            # content est un dict {"type": "tableContent", "rows": [...]}
+            # et non une liste comme pour les autres blocs.
+            table_content = content if isinstance(content, dict) else {}
+            rows = table_content.get("rows", [])
+            if not rows:
+                return ""
+
+            # Détecte les cellules fusionnées (rowspan ou colspan > 1)
+            has_merge = any(
+                (cell.get("props", {}).get("rowspan", 1) or 1) > 1
+                or (cell.get("props", {}).get("colspan", 1) or 1) > 1
+                for row in rows
+                for cell in (row.get("cells", []) if isinstance(row, dict) else [])
+                if isinstance(cell, dict)
+            )
+
+            if has_merge:
+                # Rendu HTML pour préserver les fusions de cellules
+                # (le Markdown pipe table ne supporte pas rowspan/colspan)
+                html_rows = []
+                for row in rows:
+                    cells = row.get("cells", []) if isinstance(row, dict) else []
+                    td_parts = []
+                    for cell in cells:
+                        if not isinstance(cell, dict):
+                            continue
+                        cell_html = DocsClient._render_inline_html(cell.get("content", []))
+                        props = cell.get("props", {})
+                        colspan = props.get("colspan", 1) or 1
+                        rowspan = props.get("rowspan", 1) or 1
+                        attrs = ""
+                        if colspan > 1:
+                            attrs += f' colspan="{colspan}"'
+                        if rowspan > 1:
+                            attrs += f' rowspan="{rowspan}"'
+                        _style = "border: 1px solid #ccc; padding: 6px;"
+                        td_parts.append(f'<td{attrs} style="{_style}">{cell_html}</td>')
+                    html_rows.append("  <tr>" + "".join(td_parts) + "</tr>")
+                _table_style = "border-collapse: collapse; border: 1px solid #ccc;"
+                return f'<table style="{_table_style}">\n' + "\n".join(html_rows) + "\n</table>"
+
+            else:
+                # Rendu Markdown standard (tableau sans fusion)
+                rendered_rows = []
+                for row in rows:
+                    cells = row.get("cells", []) if isinstance(row, dict) else []
+                    cell_texts = [
+                        DocsClient._render_inline(cell.get("content", []) if isinstance(cell, dict) else [])
+                        for cell in cells
+                    ]
+                    rendered_rows.append("| " + " | ".join(cell_texts) + " |")
+                n_cols = max(r.count("|") - 1 for r in rendered_rows)
+                separator = "| " + " | ".join(["---"] * max(n_cols, 1)) + " |"
+                return "\n".join([rendered_rows[0], separator] + rendered_rows[1:])
+
+        else:
+            # paragraph ou bloc custom inconnu — extraction best-effort
+            return f"{pad}{inline}{children_str}" if (inline or children_str) else ""
+
+    @staticmethod
+    def blocknote_to_markdown(blocks: list[dict]) -> str:
+        """Convertit une liste de blocs BlockNote JSON en markdown standard.
+
+        Gère les blocs natifs BlockNote (heading, paragraph, bulletListItem,
+        numberedListItem, checkListItem, codeBlock, image, table) et les blocs
+        custom de Docs (callout → blockquote avec émoji).
+        Les blocs et inline contents inconnus ont leur texte extrait en best-effort.
+
+        Args:
+            blocks: liste de blocs BlockNote (retournée par get_json_blocks())
+
+        Returns:
+            str: contenu markdown
+        """
+        if not blocks:
+            return ""
+        rendered = [DocsClient._render_block(b) for b in blocks]
+        result = "\n\n".join(r for r in rendered if r)
+        return re.sub(r"\n{3,}", "\n\n", result).strip()
 
     # ──────────────────────────────────────────────
     #  LISTE DES SOUS-DOCUMENTS (ENFANTS)
@@ -418,12 +892,20 @@ class DocsClient:
             "updated_at": metadata.get("updated_at"),
         }
 
-    def fetch_children_with_content(self, parent_url_or_id):
+    def fetch_children_with_content(self, parent_url_or_id,
+                                    content_format: str = "markdown"):
         """
-        Récupère tous les enfants d'un doc parent avec leur contenu markdown.
+        Récupère tous les enfants d'un doc parent avec leur contenu.
+
+        Args:
+            parent_url_or_id: URL ou UUID du document parent
+            content_format: format de récupération du contenu —
+                'json'     : JSON BlockNote → markdown (recommandé, préserve les callouts)
+                'markdown' : markdown brut depuis le Y-Provider
+                'html'     : HTML converti en texte
 
         Returns:
-            list de dicts avec id, title, content_markdown, ...
+            list de dicts avec id, title, content_markdown, content_format, ...
         """
         parent_id = self.extract_doc_id(parent_url_or_id)
         if not parent_id:
@@ -434,12 +916,24 @@ class DocsClient:
         for child in children:
             child_id = child["id"]
             try:
-                content_data = self.get_content(child_id, "markdown")
-                # `or ""` gère le cas {"content": null} (document jamais édité)
+                if content_format == "json":
+                    blocks = self.get_json_blocks(child_id)
+                    content_md = self.embed_internal_images(self.blocknote_to_markdown(blocks))
+                    fmt = "json→md"
+                elif content_format == "html":
+                    html = self.get_html(child_id)
+                    content_md = self.html_to_text(html)
+                    fmt = "html"
+                else:  # "markdown" ou "auto"
+                    content_data = self.get_content(child_id, "markdown")
+                    # `or ""` gère le cas {"content": null} (document jamais édité)
+                    content_md = content_data.get("content") or ""
+                    fmt = "markdown"
                 results.append({
                     "id": child_id,
                     "title": child.get("title", ""),
-                    "content_markdown": content_data.get("content") or "",
+                    "content_markdown": content_md,
+                    "content_format": fmt,
                     "created_at": child.get("created_at"),
                     "updated_at": child.get("updated_at"),
                 })
@@ -471,7 +965,7 @@ class DocsClient:
     def flatten_tree(self, node: dict, base_url: str,
                      parent_numero: str | None = None, position: int = 1,
                      is_root: bool = False,
-                     content_format: str = "auto") -> list[dict]:
+                     content_format: str = "json") -> list[dict]:
         """
         Parcourt récursivement le tree retourné par get_tree() et retourne
         une liste de records prêts à être insérés dans Grist.
@@ -489,9 +983,10 @@ class DocsClient:
             is_root: si True, le nœud racine est ignoré et ses enfants sont
                      numérotés à partir de 1 directement (Guide=1, Outils=2, etc.)
             content_format: format de récupération du contenu —
-                'markdown' : texte markdown brut (peut échouer sur certains émojis)
+                'json'     : JSON BlockNote → markdown (défaut, préserve callouts et blocs custom)
+                'markdown' : texte markdown brut (peut échouer sur certains blocs custom)
                 'html'     : HTML converti en texte → meilleure compatibilité émojis
-                'auto'     : essaie markdown, bascule sur HTML si échec (défaut)
+                'auto'     : essaie markdown, bascule sur HTML si échec
 
         Returns:
             list de dicts {"fields": {...}} pour l'API Grist
@@ -514,7 +1009,7 @@ class DocsClient:
         # évitant ainsi un appel get_markdown() supplémentaire par enfant.
         if numchild > 0 and not children:
             try:
-                raw = self.fetch_children_with_content(doc_id)
+                raw = self.fetch_children_with_content(doc_id, content_format=content_format)
                 children = [
                     {
                         "id": c["id"],
@@ -526,7 +1021,8 @@ class DocsClient:
                         # `or ""` : content_markdown peut être None si
                         # fetch_children_with_content a capturé une erreur
                         "_content": c.get("content_markdown") or "",
-                        "_content_format": "markdown" if not c.get("error") else "conversion_echec",
+                        "_content_format": (c.get("content_format", "markdown")
+                                            if not c.get("error") else "conversion_echec"),
                     }
                     for c in raw
                 ]
@@ -557,7 +1053,17 @@ class DocsClient:
         fmt_utilise = node.get("_content_format", "markdown")
 
         if contenu is None:
-            if content_format == "markdown":
+            if content_format == "json":
+                try:
+                    blocks = self.get_json_blocks(doc_id)
+                    contenu = self.embed_internal_images(self.blocknote_to_markdown(blocks))
+                    fmt_utilise = "json→md"
+                except Exception as e:
+                    print(f"    ⚠️  Contenu JSON non récupéré pour {doc_id}: {e}")
+                    contenu = ""
+                    fmt_utilise = "erreur"
+
+            elif content_format == "markdown":
                 try:
                     contenu = self.get_markdown(doc_id)
                     fmt_utilise = "markdown"
