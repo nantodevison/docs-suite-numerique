@@ -485,6 +485,45 @@ class DocsClient:
         return "".join(parts)
 
     @staticmethod
+    def _render_inline_html(inline_items: list) -> str:
+        """Convertit une liste d'inline content BlockNote en HTML.
+
+        Utilisé pour les cellules de tableaux avec rowspan/colspan, où le
+        Markdown pipe table ne peut pas représenter les fusions.
+        """
+        parts = []
+        for item in (inline_items or []):
+            itype = item.get("type", "text")
+            if itype == "text":
+                text = item.get("text", "")
+                styles = item.get("styles", {})
+                if styles.get("code"):
+                    parts.append(f"<code>{text}</code>")
+                    continue
+                if styles.get("bold") and styles.get("italic"):
+                    text = f"<strong><em>{text}</em></strong>"
+                elif styles.get("bold"):
+                    text = f"<strong>{text}</strong>"
+                elif styles.get("italic"):
+                    text = f"<em>{text}</em>"
+                if styles.get("strikethrough"):
+                    text = f"<del>{text}</del>"
+                parts.append(text)
+            elif itype == "link":
+                link_html = DocsClient._render_inline_html(item.get("content", []))
+                href = item.get("href", "")
+                if not link_html:
+                    link_html = href
+                parts.append(f'<a href="{href}">{link_html}</a>')
+            else:
+                sub = item.get("content", [])
+                if isinstance(sub, list) and sub:
+                    parts.append(DocsClient._render_inline_html(sub))
+                elif item.get("text"):
+                    parts.append(str(item["text"]))
+        return "".join(parts)
+
+    @staticmethod
     def _render_block(block: dict, indent: int = 0) -> str:
         """Convertit un bloc BlockNote en markdown (récursif pour les enfants)."""
         btype = block.get("type", "paragraph")
@@ -547,22 +586,60 @@ class DocsClient:
             return f"{pad}[image{': ' + caption if caption else ''}]{children_str}"
 
         elif btype == "table":
-            rows = content if isinstance(content, list) else []
-            rendered_rows = []
-            for row in rows:
-                cells = row.get("content", []) if isinstance(row, dict) else []
-                cell_texts = [
-                    DocsClient._render_inline(
-                        cell.get("content", []) if isinstance(cell, dict) else []
-                    )
-                    for cell in cells
-                ]
-                rendered_rows.append("| " + " | ".join(cell_texts) + " |")
-            if not rendered_rows:
+            # content est un dict {"type": "tableContent", "rows": [...]}
+            # et non une liste comme pour les autres blocs.
+            table_content = content if isinstance(content, dict) else {}
+            rows = table_content.get("rows", [])
+            if not rows:
                 return ""
-            n_cols = max(r.count("|") - 1 for r in rendered_rows)
-            separator = "| " + " | ".join(["---"] * max(n_cols, 1)) + " |"
-            return "\n".join([rendered_rows[0], separator] + rendered_rows[1:])
+
+            # Détecte les cellules fusionnées (rowspan ou colspan > 1)
+            has_merge = any(
+                (cell.get("props", {}).get("rowspan", 1) or 1) > 1
+                or (cell.get("props", {}).get("colspan", 1) or 1) > 1
+                for row in rows
+                for cell in (row.get("cells", []) if isinstance(row, dict) else [])
+                if isinstance(cell, dict)
+            )
+
+            if has_merge:
+                # Rendu HTML pour préserver les fusions de cellules
+                # (le Markdown pipe table ne supporte pas rowspan/colspan)
+                html_rows = []
+                for row in rows:
+                    cells = row.get("cells", []) if isinstance(row, dict) else []
+                    td_parts = []
+                    for cell in cells:
+                        if not isinstance(cell, dict):
+                            continue
+                        cell_html = DocsClient._render_inline_html(cell.get("content", []))
+                        props = cell.get("props", {})
+                        colspan = props.get("colspan", 1) or 1
+                        rowspan = props.get("rowspan", 1) or 1
+                        attrs = ""
+                        if colspan > 1:
+                            attrs += f' colspan="{colspan}"'
+                        if rowspan > 1:
+                            attrs += f' rowspan="{rowspan}"'
+                        _style = "border: 1px solid #ccc; padding: 6px;"
+                        td_parts.append(f'<td{attrs} style="{_style}">{cell_html}</td>')
+                    html_rows.append("  <tr>" + "".join(td_parts) + "</tr>")
+                _table_style = "border-collapse: collapse; border: 1px solid #ccc;"
+                return f'<table style="{_table_style}">\n' + "\n".join(html_rows) + "\n</table>"
+
+            else:
+                # Rendu Markdown standard (tableau sans fusion)
+                rendered_rows = []
+                for row in rows:
+                    cells = row.get("cells", []) if isinstance(row, dict) else []
+                    cell_texts = [
+                        DocsClient._render_inline(cell.get("content", []) if isinstance(cell, dict) else [])
+                        for cell in cells
+                    ]
+                    rendered_rows.append("| " + " | ".join(cell_texts) + " |")
+                n_cols = max(r.count("|") - 1 for r in rendered_rows)
+                separator = "| " + " | ".join(["---"] * max(n_cols, 1)) + " |"
+                return "\n".join([rendered_rows[0], separator] + rendered_rows[1:])
 
         else:
             # paragraph ou bloc custom inconnu — extraction best-effort
