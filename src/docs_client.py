@@ -303,14 +303,35 @@ class DocsClient:
         return len(_EMOJI_RE.findall(text or ""))
 
     @staticmethod
-    def strip_code_blocks(text: str) -> str:
+    def strip_code_blocks(text: str, languages: list[str] | None = None) -> str:
         """Supprime les blocs de code markdown (``` … ```) d'un texte.
 
-        Remplace chaque bloc par un marqueur textuel neutre.
-        Utile avant tout envoi vers des API sensibles aux injections
-        (WAF, filtres SQL, etc.).
+        Args:
+            text     : texte à nettoyer.
+            languages: si fourni, seuls les blocs dont l'identifiant de
+                       langage est dans cette liste sont supprimés (insensible
+                       à la casse). Si None, TOUS les blocs sont supprimés.
+
+        Exemples :
+            # Supprime uniquement les blocs SQL (risque WAF)
+            DocsClient.strip_code_blocks(text, languages=['sql', 'postgresql'])
+            # Supprime tous les blocs (comportement d'origine)
+            DocsClient.strip_code_blocks(text)
+
+        Note : les blocs 'callout', 'image', etc. de BlockNote sont sérialisés
+        en markdown sous forme de blocs fencés avec leur type comme langage.
+        Éviter de les supprimer pour ne pas perdre du contenu légitime.
         """
-        return _CODE_BLOCK_RE.sub('[bloc de code supprimé]', text or "")
+        if not text:
+            return ""
+        if languages is None:
+            return _CODE_BLOCK_RE.sub('[bloc de code supprimé]', text)
+        lang_alt = '|'.join(re.escape(lang) for lang in languages)
+        targeted_re = re.compile(
+            rf'```(?:{lang_alt})[ \t]*\n.*?```',
+            re.DOTALL | re.IGNORECASE,
+        )
+        return targeted_re.sub('[bloc de code supprimé]', text)
 
     # ──────────────────────────────────────────────
     #  LISTE DES SOUS-DOCUMENTS (ENFANTS)
@@ -558,7 +579,11 @@ class DocsClient:
             else:  # "auto" : markdown puis HTML en fallback
                 contenu, fmt_utilise = self.get_markdown_with_emoji_fallback(doc_id)
 
-        contenu = self.strip_code_blocks(contenu)
+        # ⚠️  Ne pas appliquer strip_code_blocks ici : les blocs custom de
+        # BlockNote (callout, etc.) sont sérialisés en fenced blocks dans le
+        # markdown. Les supprimer ferait perdre du contenu légitime.
+        # La sanitisation WAF doit être appliquée uniquement au moment de
+        # l'envoi vers des API externes (Grist, etc.).
 
         n_emojis = self.count_emojis(contenu)
         if n_emojis:
