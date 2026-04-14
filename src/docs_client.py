@@ -41,6 +41,13 @@ _EMOJI_RE = re.compile(
 # positifs WAF (Incapsula bloque les POST contenant du SQL notamment).
 _CODE_BLOCK_RE = re.compile(r'```[^\n]*\n.*?```', re.DOTALL)
 
+# Langages SQL à neutraliser avant envoi vers Grist (le WAF Incapsula bloque
+# les POST contenant du code SQL).
+WAF_SQL_LANGUAGES: list[str] = [
+    'sql', 'postgresql', 'postgres', 'psql', 'plpgsql',
+    'mysql', 'sqlite', 'tsql', 'mariadb',
+]
+
 
 # ──────────────────────────────────────────────
 #  CONVERTISSEUR HTML → TEXTE
@@ -293,6 +300,10 @@ class DocsClient:
         """
         try:
             blocks = self.get_json_blocks(doc_id)
+            n_lost = self._count_internal_refs_lost(blocks)
+            if n_lost:
+                print(f"    ⚠️  {n_lost} référence(s) interne(s) non résolue(s) "
+                      f"(placeholder '[référence interne]' inséré)")
             md = self.blocknote_to_markdown(blocks)
             return md, "json→md"
         except Exception as exc:  # noqa: BLE001
@@ -377,6 +388,45 @@ class DocsClient:
         )
         return targeted_re.sub('[bloc de code supprimé]', text)
 
+    @staticmethod
+    def sanitize_for_waf(text: str) -> str:
+        """Supprime les blocs de code SQL du markdown pour éviter les blocages WAF.
+
+        Le WAF Incapsula bloque les POST contenant du SQL. Cette méthode applique
+        `strip_code_blocks` avec la liste `WAF_SQL_LANGUAGES` définie au niveau
+        module — les autres langages (Python, bash, etc.) sont conservés.
+        """
+        return DocsClient.strip_code_blocks(text, languages=WAF_SQL_LANGUAGES)
+
+    @staticmethod
+    def _count_internal_refs_lost(blocks: list[dict]) -> int:
+        """Compte récursivement les éléments de liste dont le contenu est vide.
+
+        Un élément de liste à contenu vide (content: []) indique qu'une
+        référence interne Docs (@mention) était présente mais a été supprimée
+        silencieusement par le Y-Provider lors de la sérialisation JSON.
+        Ces éléments sont rendus par _render_block avec le placeholder
+        '[référence interne]'.
+
+        Returns:
+            Nombre d'éléments affectés.
+        """
+        count = 0
+        for b in blocks:
+            btype = b.get("type", "")
+            if btype in ("bulletListItem", "numberedListItem", "checkListItem"):
+                content = b.get("content", [])
+                if isinstance(content, list):
+                    has_text = any(
+                        i.get("type") == "text" and i.get("text", "").strip()
+                        for i in content
+                    )
+                    has_link = any(i.get("type") == "link" for i in content)
+                    if not has_text and not has_link and not b.get("children"):
+                        count += 1
+            count += DocsClient._count_internal_refs_lost(b.get("children", []))
+        return count
+
     # ──────────────────────────────────────────────
     #  CONVERTISSEUR BLOCKNOTE JSON → MARKDOWN
     # ──────────────────────────────────────────────
@@ -406,14 +456,32 @@ class DocsClient:
             elif itype == "link":
                 link_text = DocsClient._render_inline(item.get("content", []))
                 href = item.get("href", "")
+                if not link_text:
+                    # Lien interne Docs : le titre est résolu dynamiquement par
+                    # le frontend — le JSON ne contient pas de texte visible.
+                    # Fallback : on affiche l'URL brute.
+                    link_text = href
                 parts.append(f"[{link_text}]({href})")
             else:
                 # Inline custom inconnu (mention, etc.) — extraction best-effort
+                # Priorité : content récursif → text → props (strings) → attrs
                 sub = item.get("content", [])
-                if isinstance(sub, list):
+                if isinstance(sub, list) and sub:
                     parts.append(DocsClient._render_inline(sub))
+                elif isinstance(sub, str) and sub:
+                    parts.append(sub)
                 elif item.get("text"):
                     parts.append(str(item["text"]))
+                else:
+                    # Dernier recours : valeurs string non-vides des props
+                    # (couvre les mentions, références internes, etc.)
+                    props = item.get("props", {})
+                    prop_texts = [
+                        str(v) for v in props.values()
+                        if isinstance(v, str) and v
+                    ]
+                    if prop_texts:
+                        parts.append(" ".join(prop_texts))
         return "".join(parts)
 
     @staticmethod
@@ -429,8 +497,10 @@ class DocsClient:
         # Texte inline du bloc courant
         inline = DocsClient._render_inline(content) if isinstance(content, list) else ""
 
-        # Enfants (listes imbriquées, etc.)
-        child_lines = [DocsClient._render_block(ch, indent + 1) for ch in children]
+        # Enfants (listes imbriquées, etc.) — on filtre les rendus vides
+        child_lines = [r for r in
+                       (DocsClient._render_block(ch, indent + 1) for ch in children)
+                       if r]
         children_str = ("\n" + "\n".join(child_lines)) if child_lines else ""
 
         if btype == "heading":
@@ -438,14 +508,19 @@ class DocsClient:
             return f"{pad}{'#' * level} {inline}{children_str}"
 
         elif btype == "bulletListItem":
-            return f"{pad}* {inline}{children_str}"
+            # Contenu vide : l'élément existait mais sa référence interne
+            # (@mention Docs) a été supprimée silencieusement par le Y-Provider.
+            display = inline if inline else "[référence interne]"
+            return f"{pad}* {display}{children_str}"
 
         elif btype == "numberedListItem":
-            return f"{pad}1. {inline}{children_str}"
+            display = inline if inline else "[référence interne]"
+            return f"{pad}1. {display}{children_str}"
 
         elif btype == "checkListItem":
             box = "x" if props.get("checked") else " "
-            return f"{pad}- [{box}] {inline}{children_str}"
+            display = inline if inline else "[référence interne]"
+            return f"{pad}- [{box}] {display}{children_str}"
 
         elif btype == "codeBlock":
             lang = props.get("language", "")
