@@ -1,0 +1,141 @@
+{
+  "version": "2.0.0",
+  "inputs": [
+    {
+      "id": "widget",
+      "type": "pickString",
+      "description": "Widget à servir localement",
+      "options": ["echanges", "questions", "parcours-doc"],
+      "default": "echanges"
+    },
+    {
+      "id": "port",
+      "type": "promptString",
+      "description": "Port du serveur local",
+      "default": "8080"
+    }
+  ],
+  "tasks": [
+    {
+      // Démarre un serveur HTTP Python dans le dossier du widget choisi.
+      // Accessible sur http://localhost:<port>/
+      // Utiliser ensuite Grist → Custom Widget → URL : http://localhost:<port>/
+      "label": "Grist: démarrer le serveur local (Python)",
+      "type": "shell",
+      "command": "python -m http.server ${input:port}",
+      "options": {
+        "cwd": "${workspaceFolder}/grist_widgets/${input:widget}"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": false
+      },
+      "group": "none"
+    },
+    {
+      // Raccourci : serveur local pour le widget Échanges sur le port 8081.
+      "label": "Grist: serveur – echanges (port 8081)",
+      "type": "shell",
+      "command": "python -m http.server 8081",
+      "options": {
+        "cwd": "${workspaceFolder}/grist_widgets/echanges"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false
+      },
+      "group": "none"
+    },
+    {
+      // Raccourci : serveur local pour le widget Questions sur le port 8082.
+      "label": "Grist: serveur – questions (port 8082)",
+      "type": "shell",
+      "command": "python -m http.server 8082",
+      "options": {
+        "cwd": "${workspaceFolder}/grist_widgets/questions"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false
+      },
+      "group": "none"
+    },
+    {
+      // Raccourci : serveur local pour le widget Parcours-doc sur le port 8083.
+      "label": "Grist: serveur – parcours-doc (port 8083)",
+      "type": "shell",
+      "command": "python -m http.server 8083",
+      "options": {
+        "cwd": "${workspaceFolder}/grist_widgets/parcours-doc"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false
+      },
+      "group": "none"
+    },
+    {
+      // Installe les dépendances npm du custom-widget-builder (si utilisé).
+      // À lancer une seule fois dans le sous-dossier du widget.
+      "label": "Grist: npm install (custom-widget-builder)",
+      "type": "shell",
+      "command": "npm install",
+      "options": {
+        "cwd": "${workspaceFolder}/grist_widgets/${input:widget}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "group": "none"
+    },
+    {
+      // Lance le serveur de développement Vite du custom-widget-builder.
+      // À utiliser uniquement si le widget utilise le template custom-widget-builder.
+      // Le serveur Vite démarre par défaut sur http://localhost:5173/.
+      "label": "Grist: npm run dev (custom-widget-builder)",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": {
+        "cwd": "${workspaceFolder}/grist_widgets/${input:widget}"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false
+      },
+      "group": "none"
+    },
+    {
+      // Construit les artefacts du custom-widget-builder (dossier dist/).
+      // Copier ensuite le contenu de dist/ dans Grist (voir README).
+      "label": "Grist: npm run build (custom-widget-builder)",
+      "type": "shell",
+      "command": "npm run build",
+      "options": {
+        "cwd": "${workspaceFolder}/grist_widgets/${input:widget}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "group": "build"
+    }
+  ]
+}

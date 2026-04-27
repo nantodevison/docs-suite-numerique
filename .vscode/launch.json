@@ -1,0 +1,50 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Ouvre le widget Échanges dans Chrome connecté au serveur local (port 8081).
+      // Prérequis : lancer la tâche "Grist: serveur – echanges (port 8081)" au préalable.
+      "name": "Ouvrir – Échanges (port 8081)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:8081/index.html",
+      "webRoot": "${workspaceFolder}/grist_widgets/echanges"
+    },
+    {
+      // Ouvre le widget Questions dans Chrome connecté au serveur local (port 8082).
+      // Prérequis : lancer la tâche "Grist: serveur – questions (port 8082)" au préalable.
+      "name": "Ouvrir – Questions (port 8082)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:8082/index.html",
+      "webRoot": "${workspaceFolder}/grist_widgets/questions"
+    },
+    {
+      // Ouvre le widget Parcours-doc dans Chrome connecté au serveur local (port 8083).
+      // Prérequis : lancer la tâche "Grist: serveur – parcours-doc (port 8083)" au préalable.
+      "name": "Ouvrir – Parcours-doc (port 8083)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:8083/index.html",
+      "webRoot": "${workspaceFolder}/grist_widgets/parcours-doc"
+    },
+    {
+      // Ouvre un widget custom-widget-builder dans Chrome (serveur Vite, port 5173 par défaut).
+      // Prérequis : lancer la tâche "Grist: npm run dev (custom-widget-builder)" au préalable.
+      "name": "Ouvrir – custom-widget-builder (Vite port 5173)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173/",
+      "webRoot": "${workspaceFolder}/grist_widgets/${input:widget}"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "widget",
+      "type": "pickString",
+      "description": "Widget à ouvrir (custom-widget-builder)",
+      "options": ["echanges", "questions", "parcours-doc"],
+      "default": "echanges"
+    }
+  ]
+}

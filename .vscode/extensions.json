@@ -1,0 +1,14 @@
+{
+  // Extensions recommandées pour le développement des widgets Grist.
+  // VS Code proposera de les installer à l'ouverture du dépôt.
+  "recommendations": [
+    // Serveur de développement local avec rechargement automatique
+    "ritwickdey.LiveServer",
+    // Formateur HTML / CSS / JS
+    "esbenp.prettier-vscode",
+    // Support Python (sync.py, notebooks)
+    "ms-python.python",
+    // Colorisation des fichiers .env
+    "mikestead.dotenv"
+  ]
+}

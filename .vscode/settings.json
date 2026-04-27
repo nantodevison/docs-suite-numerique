@@ -1,0 +1,27 @@
+{
+  // ── Éditeur ────────────────────────────────────────────────────────────────
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.python"
+  },
+
+  // ── Live Server ────────────────────────────────────────────────────────────
+  // Live Server utilise le port 5500 par défaut (http://localhost:5500/).
+  // Ouvrir automatiquement le navigateur au démarrage du serveur.
+  "liveServer.settings.NoBrowser": false,
+  // Ne pas afficher la bulle "Go Live" dans la barre d'état pour tous les fichiers.
+  "liveServer.settings.donotShowInfoMsg": true,
+
+  // ── Fichiers ───────────────────────────────────────────────────────────────
+  "files.associations": {
+    "*.html": "html"
+  },
+  // Exclure les artefacts de build du custom-widget-builder de l'explorateur.
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/.venv": true,
+    "**/__pycache__": true
+  }
+}
