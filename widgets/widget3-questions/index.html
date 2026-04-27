@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Questions – Widget Grist</title>
+  <!-- Grist plugin API (chargé depuis l'instance Grist hôte) -->
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <!-- Markdown parser -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+  <!-- XSS sanitizer -->
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #16b378;
+      --primary-dark: #0d9060;
+      --danger: #c0000e;
+      --warning-bg: #fff3cd;
+      --warning-text: #856404;
+      --warning-border: #ffc107;
+      --bg: #f4f5f7;
+      --surface: #ffffff;
+      --border: #dde1e7;
+      --text: #1f2329;
+      --text-light: #6b7280;
+      --radius: 8px;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    html, body {
+      height: 100%; overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 14px; color: var(--text); background: var(--bg);
+    }
+    body { display: flex; flex-direction: column; }
+
+    /* ── Utility ── */
+    .hidden { display: none !important; }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 6px 12px; border: none; border-radius: 6px;
+      font-size: 13px; font-weight: 500; font-family: inherit;
+      cursor: pointer; transition: background 0.15s, opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary   { background: var(--primary); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-dark); }
+    .btn-secondary { background: #f0f2f5; color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover:not(:disabled) { background: #e4e6ea; }
+    .btn-danger    { background: var(--danger); color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: #8b0007; }
+    .btn-warning   { background: #f5a623; color: #fff; }
+    .btn-warning:hover:not(:disabled) { background: #d4881a; }
+    .btn-ghost     { background: transparent; color: var(--text-light); padding: 3px 7px; font-size: 12px; }
+    .btn-ghost:hover:not(:disabled) { background: #f0f2f5; color: var(--text); }
+    .btn-sm { padding: 4px 9px; font-size: 12px; }
+
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 12px;
+      font-size: 11px; font-weight: 600;
+    }
+    .badge-duplicate { background: var(--warning-bg); color: var(--warning-text); border: 1px solid var(--warning-border); }
+    .badge-active    { background: #d1e7dd; color: #0a4726; }
+    .badge-own       { background: #e8f0fe; color: #1a73e8; border: 1px solid #c2d1f0; }
+
+    .alert {
+      padding: 9px 13px; border-radius: 6px; font-size: 13px; line-height: 1.4;
+    }
+    .alert-error   { background: #fde8e8; color: #c0000e; border: 1px solid #f5c6cb; }
+    .alert-warning { background: var(--warning-bg); color: var(--warning-text); border: 1px solid var(--warning-border); }
+    .alert-info    { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block; width: 22px; height: 22px;
+      border: 3px solid rgba(22,179,120,.2); border-radius: 50%;
+      border-top-color: var(--primary);
+      animation: spin 0.7s linear infinite;
+    }
+
+    /* ── Setup / error panels ── */
+    #panel-loading,
+    #panel-error,
+    #panel-user-setup {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 14px; padding: 32px; text-align: center;
+    }
+    #panel-error { color: var(--danger); }
+    #panel-user-setup select,
+    #panel-user-setup button { width: 100%; max-width: 320px; }
+    #panel-user-setup select {
+      padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+      font-size: 14px; font-family: inherit;
+    }
+
+    /* ── Main ── */
+    #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ── Header ── */
+    #header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 10px 16px;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; flex-shrink: 0; flex-wrap: wrap;
+    }
+    #user-section { display: flex; align-items: center; gap: 8px; }
+    .avatar {
+      width: 34px; height: 34px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 12px; color: #fff;
+      flex-shrink: 0; user-select: none;
+    }
+    #user-name { font-weight: 600; }
+    #btn-rename {
+      font-size: 11px; padding: 0; color: var(--text-light);
+      background: transparent; border: none; cursor: pointer; font-family: inherit;
+    }
+    #btn-rename:hover { color: var(--primary); }
+
+    /* ── Toolbar ── */
+    #toolbar {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 8px 16px; display: flex; gap: 8px; align-items: center;
+      flex-shrink: 0; flex-wrap: wrap;
+    }
+    #search-input {
+      flex: 1; min-width: 140px; padding: 6px 10px;
+      border: 1px solid var(--border); border-radius: 6px;
+      font-size: 13px; font-family: inherit; outline: none;
+      transition: border-color 0.15s;
+    }
+    #search-input:focus { border-color: var(--primary); }
+    #filter-select {
+      padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+      font-size: 13px; font-family: inherit; background: var(--surface);
+      cursor: pointer; outline: none;
+    }
+    #result-count { font-size: 12px; color: var(--text-light); white-space: nowrap; }
+
+    /* ── Question list ── */
+    #questions-container {
+      flex: 1; overflow-y: auto; padding: 12px 16px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    #questions-container::-webkit-scrollbar { width: 5px; }
+    #questions-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .q-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 12px 14px;
+      box-shadow: var(--shadow-sm); cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .q-card:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(22,179,120,.12); }
+    .q-card.selected { border-color: var(--primary); background: #f0fbf6; }
+    .q-card.is-duplicate { opacity: 0.7; }
+
+    .q-card-header {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 8px; margin-bottom: 6px;
+    }
+    .q-titre {
+      font-weight: 600; font-size: 14px; line-height: 1.4;
+      word-break: break-word; flex: 1;
+    }
+    .q-badges { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; align-items: flex-start; }
+
+    .q-contenu {
+      font-size: 13px; color: var(--text-light); line-height: 1.4;
+      overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+
+    .q-meta {
+      display: flex; gap: 8px; align-items: center;
+      font-size: 12px; color: var(--text-light); margin-top: 6px; flex-wrap: wrap;
+    }
+
+    .q-actions {
+      display: flex; gap: 4px; margin-top: 8px;
+      opacity: 0; transition: opacity 0.15s;
+    }
+    .q-card:hover .q-actions,
+    .q-card.selected .q-actions { opacity: 1; }
+
+    /* ── Detail panel ── */
+    #detail-panel {
+      background: var(--surface); border-top: 1px solid var(--border);
+      padding: 14px 16px; flex-shrink: 0; max-height: 40vh; overflow-y: auto;
+    }
+    #detail-panel h4 { font-size: 15px; margin-bottom: 8px; }
+    #detail-content { font-size: 13px; line-height: 1.6; color: var(--text); }
+    #detail-content img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 4px 0; }
+    #detail-content a   { color: var(--primary); }
+
+    /* Edit form inside detail panel */
+    #edit-form { display: flex; flex-direction: column; gap: 10px; }
+    #edit-form label { font-weight: 600; font-size: 13px; }
+    #edit-titre-input {
+      width: 100%; padding: 7px 10px;
+      border: 1px solid var(--primary); border-radius: 6px;
+      font-size: 14px; font-family: inherit; outline: none;
+    }
+    #edit-contenu-input {
+      width: 100%; min-height: 80px; padding: 7px 10px;
+      border: 1px solid var(--primary); border-radius: 6px;
+      font-size: 13px; font-family: inherit; resize: vertical; outline: none;
+    }
+    #edit-actions { display: flex; gap: 8px; }
+
+    /* ── Modals ── */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.38);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000; padding: 16px;
+    }
+    .modal-box {
+      background: var(--surface); border-radius: var(--radius);
+      padding: 22px 24px; max-width: 460px; width: 100%;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    }
+    .modal-title  { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+    .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 13px; }
+    .form-group input,
+    .form-group select {
+      width: 100%; padding: 8px 10px;
+      border: 1px solid var(--border); border-radius: 6px;
+      font-size: 14px; font-family: inherit; outline: none;
+      transition: border-color 0.15s;
+    }
+    .form-group input:focus,
+    .form-group select:focus { border-color: var(--primary); }
+    .form-help  { font-size: 12px; color: var(--text-light); margin-top: 4px; }
+    .form-error { font-size: 12px; color: var(--danger); margin-top: 5px; }
+
+    /* Empty state */
+    #empty-state {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 10px; color: var(--text-light); text-align: center; padding: 32px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════ LOADING ══════════ -->
+<div id="panel-loading">
+  <div class="spinner"></div>
+  <p style="color:var(--text-light)">Chargement du widget…</p>
+</div>
+
+<!-- ══════════ ERROR ══════════ -->
+<div id="panel-error" class="hidden">
+  <p style="font-size:28px">⚠️</p>
+  <p><strong>Erreur</strong></p>
+  <p id="panel-error-msg" style="font-size:13px;color:var(--text-light);max-width:340px"></p>
+</div>
+
+<!-- ══════════ USER SETUP ══════════ -->
+<div id="panel-user-setup" class="hidden">
+  <p style="font-size:28px">👤</p>
+  <h3 style="font-size:16px">Identifiez-vous</h3>
+  <p style="font-size:13px;color:var(--text-light);max-width:300px">
+    Votre compte n'a pas été reconnu automatiquement.
+    Sélectionnez votre profil pour continuer.
+  </p>
+  <select id="user-select">
+    <option value="">— Sélectionnez votre nom —</option>
+  </select>
+  <button class="btn btn-primary" onclick="confirmUserSelection()">Confirmer</button>
+  <p id="user-setup-error" class="form-error hidden"></p>
+</div>
+
+<!-- ══════════ MAIN ══════════ -->
+<div id="main" class="hidden">
+
+  <!-- Header -->
+  <div id="header">
+    <div id="user-section">
+      <div class="avatar" id="user-avatar" style="background:#16b378">?</div>
+      <div>
+        <div id="user-name">…</div>
+        <button id="btn-rename" onclick="showRenameModal()">✏️ Modifier le nom</button>
+      </div>
+    </div>
+    <div style="font-size:13px;color:var(--text-light)">Widget Questions</div>
+  </div>
+
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <input type="search" id="search-input" placeholder="🔍 Rechercher une question…" oninput="applyFilters()">
+    <select id="filter-select" onchange="applyFilters()">
+      <option value="all">Toutes</option>
+      <option value="active">Actives</option>
+      <option value="duplicate">Doublons</option>
+      <option value="mine">Mes questions</option>
+    </select>
+    <span id="result-count"></span>
+    <button class="btn btn-secondary btn-sm" onclick="refresh()" title="Recharger les données">⟳ Actualiser</button>
+  </div>
+
+  <!-- Question list -->
+  <div id="questions-container">
+    <div id="empty-state">
+      <p style="font-size:24px">📋</p>
+      <p style="font-weight:600">Aucune question trouvée</p>
+      <p style="font-size:13px">Essayez de modifier votre recherche ou votre filtre.</p>
+    </div>
+  </div>
+
+  <!-- Detail / edit panel (shown when a question is selected) -->
+  <div id="detail-panel" class="hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h4 id="detail-title">Détail</h4>
+      <button class="btn btn-ghost btn-sm" onclick="closeDetail()">✕</button>
+    </div>
+    <!-- Read mode -->
+    <div id="detail-read">
+      <div id="detail-content"></div>
+      <div id="detail-actions" style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"></div>
+    </div>
+    <!-- Edit mode -->
+    <div id="detail-edit" class="hidden">
+      <div id="edit-form">
+        <div>
+          <label for="edit-titre-input">Titre</label>
+          <input type="text" id="edit-titre-input" maxlength="255" placeholder="Titre de la question">
+        </div>
+        <div>
+          <label for="edit-contenu-input">Contenu (optionnel)</label>
+          <textarea id="edit-contenu-input" placeholder="Description détaillée…"></textarea>
+        </div>
+        <div id="edit-actions">
+          <button class="btn btn-secondary btn-sm" onclick="cancelEdit()">Annuler</button>
+          <button class="btn btn-primary btn-sm" onclick="saveEdit()">Enregistrer</button>
+        </div>
+        <p id="edit-error" class="form-error hidden"></p>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<!-- ══════════ MODAL: Rename ══════════ -->
+<div id="modal-rename" class="modal-overlay hidden" onclick="overlayClose(event,'modal-rename')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title">✏️ Modifier votre nom affiché</div>
+    <div class="form-group">
+      <label for="rename-input">Nouveau nom</label>
+      <input type="text" id="rename-input" maxlength="100"
+             placeholder="Votre nom…"
+             onkeydown="if(event.key==='Enter')confirmRename()">
+      <div class="form-help">Ce nom est visible par tous les participants.</div>
+    </div>
+    <p id="rename-error" class="form-error hidden"></p>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-rename')">Annuler</button>
+      <button class="btn btn-primary" onclick="confirmRename()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ MODAL: Mark duplicate ══════════ -->
+<div id="modal-duplicate" class="modal-overlay hidden" onclick="overlayClose(event,'modal-duplicate')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title">⚠️ Marquer comme doublon</div>
+    <div class="alert alert-warning" style="margin-bottom:14px">
+      Cette question sera signalée comme doublon. Vous pouvez indiquer la question originale (canonique).
+    </div>
+    <div class="form-group">
+      <label for="canonical-select">Question canonique (optionnel)</label>
+      <select id="canonical-select">
+        <option value="">— Aucune —</option>
+      </select>
+      <div class="form-help">Question originale à laquelle celle-ci fait doublon.</div>
+    </div>
+    <p id="dup-error" class="form-error hidden"></p>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-duplicate')">Annuler</button>
+      <button class="btn btn-warning" onclick="confirmMarkDuplicate()">Marquer doublon</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ MODAL: Undo duplicate ══════════ -->
+<div id="modal-undup" class="modal-overlay hidden" onclick="overlayClose(event,'modal-undup')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title">✅ Retirer le statut doublon</div>
+    <p style="font-size:14px;margin-bottom:16px">Confirmez-vous la suppression du statut doublon pour cette question ?</p>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-undup')">Annuler</button>
+      <button class="btn btn-primary" onclick="confirmUndup()">Retirer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+//  CONFIGURATION — adapter aux noms de colonnes de vos tables Grist
+// ════════════════════════════════════════════════════════════════
+const CFG = {
+  // Noms des tables
+  T_QUESTIONS: 'Questions',
+  T_USERS:     'Users',
+  T_SESSION:   'Widget_Session',
+
+  // Colonnes — Questions
+  Q_TITRE:     'titre',
+  Q_CONTENU:   'contenu',
+  Q_AUTEUR:    'auteur_id',
+  Q_DATE:      'date_creation',
+  Q_DOUBLON:   'est_doublon',
+  Q_CANONIQUE: 'question_canonique',
+
+  // Colonnes — Users
+  U_NOM:       'nom',
+  U_EMAIL:     'email',
+  U_ROLE:      'role',
+
+  // Colonnes — Widget_Session
+  S_EMAIL:     'email',
+  S_USER_ID:   'user_id',
+};
+
+// ════════════════════════════════════════════════════════════════
+//  ÉTAT
+// ════════════════════════════════════════════════════════════════
+const S = {
+  user:          null,   // {id, nom, email, role}
+  users:         {},     // id → {nom, email, role}
+  questions:     [],     // [{id, titre, contenu, auteur_id, date_creation, est_doublon, question_canonique}]
+  filtered:      [],     // sous-ensemble affiché
+  selectedId:    null,   // id de la question ouverte dans le panneau détail
+  editingId:     null,   // id de la question en cours d'édition
+};
+
+// ════════════════════════════════════════════════════════════════
+//  MARKDOWN
+// ════════════════════════════════════════════════════════════════
+if (typeof marked !== 'undefined') marked.setOptions({ gfm: true, breaks: true });
+
+function renderMd(text) {
+  if (!text) return '';
+  let html = (typeof marked !== 'undefined') ? marked.parse(text) : escHtml(text).replace(/\n/g,'<br>');
+  if (typeof DOMPurify !== 'undefined') {
+    html = DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: ['p','br','strong','em','b','i','ul','ol','li','h1','h2','h3','pre','code','blockquote','a','img','hr'],
+      ALLOWED_ATTR: ['href','src','alt','title','class','style','target','rel'],
+      ADD_URI_SAFE_ATTR: ['src'],
+    });
+  }
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  tmp.querySelectorAll('img').forEach(img => { img.style.cssText = 'max-width:100%;height:auto;'; });
+  tmp.querySelectorAll('a').forEach(a  => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+  return tmp.innerHTML;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  INITIALISATION
+// ════════════════════════════════════════════════════════════════
+async function init() {
+  try {
+    if (typeof grist === 'undefined') {
+      showPanel('panel-error');
+      document.getElementById('panel-error-msg').textContent =
+        'Widget non connecté à Grist. Ouvrez ce fichier depuis un document Grist.';
+      return;
+    }
+
+    grist.ready({ requiredAccess: 'full' });
+
+    await loadUsers();
+    await identifyUser();
+    await loadQuestions();
+
+    renderList();
+    showPanel('main');
+
+  } catch (err) {
+    console.error('init()', err);
+    showPanel('panel-error');
+    document.getElementById('panel-error-msg').textContent =
+      'Erreur : ' + (err.message || String(err));
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  IDENTIFICATION UTILISATEUR (même logique que widget 2)
+// ════════════════════════════════════════════════════════════════
+async function identifyUser() {
+  // 1) grist.getUser()
+  try {
+    const gu = await grist.getUser();
+    if (gu && gu.email) {
+      const found = Object.values(S.users).find(u =>
+        u.email && u.email.toLowerCase() === gu.email.toLowerCase()
+      );
+      if (found) { setCurrentUser(found); return; }
+    }
+  } catch (_) {}
+
+  // 2) Widget_Session
+  try {
+    const sess = await grist.docApi.fetchTable(CFG.T_SESSION);
+    if (sess && sess.id && sess.id.length > 0) {
+      const uid = resolveRef((sess[CFG.S_USER_ID] || [])[0]);
+      if (uid && S.users[uid]) { setCurrentUser(S.users[uid]); return; }
+    }
+  } catch (_) {}
+
+  // 3) Options persistées
+  try {
+    const opts = await grist.getOptions();
+    if (opts && opts.currentUserId && S.users[opts.currentUserId]) {
+      setCurrentUser(S.users[opts.currentUserId]); return;
+    }
+  } catch (_) {}
+
+  // 4) Sélection manuelle
+  showManualUserSelector();
+}
+
+function setCurrentUser(user) {
+  S.user = user;
+  renderUserBadge();
+}
+
+function showManualUserSelector() {
+  const sel = document.getElementById('user-select');
+  sel.innerHTML = '<option value="">— Sélectionnez votre nom —</option>';
+  Object.values(S.users).forEach(u => {
+    const o = document.createElement('option');
+    o.value = u.id;
+    o.textContent = u.nom + (u.email ? ` (${u.email})` : '');
+    sel.appendChild(o);
+  });
+  showPanel('panel-user-setup');
+}
+
+async function confirmUserSelection() {
+  const val   = parseInt(document.getElementById('user-select').value);
+  const errEl = document.getElementById('user-setup-error');
+  if (!val) { errEl.textContent = 'Veuillez sélectionner un nom.'; errEl.classList.remove('hidden'); return; }
+  errEl.classList.add('hidden');
+  setCurrentUser(S.users[val]);
+  try { await grist.setOptions({ currentUserId: val }); } catch (_) {}
+  showPanel('main');
+  renderList();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  CHARGEMENT DES DONNÉES
+// ════════════════════════════════════════════════════════════════
+async function loadUsers() {
+  try {
+    const d = await grist.docApi.fetchTable(CFG.T_USERS);
+    S.users = {};
+    const n = (d.id || []).length;
+    for (let i = 0; i < n; i++) {
+      const id = d.id[i];
+      S.users[id] = {
+        id,
+        nom:   (d[CFG.U_NOM]   || [])[i] || `User ${id}`,
+        email: (d[CFG.U_EMAIL] || [])[i] || '',
+        role:  (d[CFG.U_ROLE]  || [])[i] || 'user',
+      };
+    }
+  } catch (err) { console.warn('loadUsers()', err); S.users = {}; }
+}
+
+async function loadQuestions() {
+  try {
+    const d = await grist.docApi.fetchTable(CFG.T_QUESTIONS);
+    S.questions = [];
+    const n = (d.id || []).length;
+    for (let i = 0; i < n; i++) {
+      S.questions.push({
+        id:              d.id[i],
+        titre:           (d[CFG.Q_TITRE]     || [])[i] || '',
+        contenu:         (d[CFG.Q_CONTENU]   || [])[i] || '',
+        auteur_id:       resolveRef((d[CFG.Q_AUTEUR]  || [])[i]),
+        date_creation:   (d[CFG.Q_DATE]      || [])[i] || 0,
+        est_doublon:     !!(d[CFG.Q_DOUBLON] || [])[i],
+        question_canonique: resolveRef((d[CFG.Q_CANONIQUE] || [])[i]),
+      });
+    }
+    S.questions.sort((a, b) => b.date_creation - a.date_creation); // plus récentes en tête
+  } catch (err) { console.warn('loadQuestions()', err); S.questions = []; }
+}
+
+function resolveRef(val) { return Array.isArray(val) ? val[1] : val; }
+
+async function refresh() {
+  await loadQuestions();
+  renderList();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  FILTRAGE & RENDU DE LA LISTE
+// ════════════════════════════════════════════════════════════════
+function applyFilters() {
+  renderList(true);
+}
+
+function renderList(keepSelection) {
+  applyFiltersInternal();
+  const cont  = document.getElementById('questions-container');
+  const empty = document.getElementById('empty-state');
+  const count = document.getElementById('result-count');
+
+  count.textContent = `${S.filtered.length} question${S.filtered.length !== 1 ? 's' : ''}`;
+
+  // Clear all cards (keep the empty-state element)
+  Array.from(cont.children).forEach(c => {
+    if (c.id !== 'empty-state') c.remove();
+  });
+
+  if (!S.filtered.length) {
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  S.filtered.forEach(q => {
+    const card = buildCard(q);
+    cont.appendChild(card);
+  });
+
+  // Restore selection if still visible
+  if (!keepSelection) S.selectedId = null;
+  if (S.selectedId) {
+    const el = document.getElementById(`qcard-${S.selectedId}`);
+    if (el) el.classList.add('selected'); else S.selectedId = null;
+  }
+}
+
+function applyFiltersInternal() {
+  const query  = (document.getElementById('search-input').value || '').toLowerCase().trim();
+  const filter = document.getElementById('filter-select').value;
+
+  S.filtered = S.questions.filter(q => {
+    if (query) {
+      const h = ((q.titre || '') + ' ' + (q.contenu || '')).toLowerCase();
+      if (!h.includes(query)) return false;
+    }
+    if (filter === 'active')    return !q.est_doublon;
+    if (filter === 'duplicate') return q.est_doublon;
+    if (filter === 'mine')      return S.user && q.auteur_id === S.user.id;
+    return true;
+  });
+}
+
+function buildCard(q) {
+  const isMe    = S.user && q.auteur_id === S.user.id;
+  const isAdmin = S.user && S.user.role === 'admin';
+  const canEdit = isMe || isAdmin;
+  const author  = S.users[q.auteur_id] || { nom: 'Inconnu' };
+
+  const card = document.createElement('div');
+  card.className = 'q-card' + (q.est_doublon ? ' is-duplicate' : '');
+  card.id = `qcard-${q.id}`;
+  card.onclick = () => selectQuestion(q.id);
+
+  // Badges
+  const badgesHtml =
+    (q.est_doublon ? `<span class="badge badge-duplicate">⚠️ Doublon</span>` : `<span class="badge badge-active">Actif</span>`) +
+    (isMe ? `<span class="badge badge-own">Ma question</span>` : '');
+
+  // Titre
+  const titreHtml = escHtml(q.titre || `Question #${q.id}`);
+
+  // Contenu (extrait)
+  const contenuHtml = q.contenu
+    ? `<div class="q-contenu">${escHtml(q.contenu)}</div>`
+    : '';
+
+  // Meta
+  const metaHtml = `
+    <div class="q-meta">
+      <span>👤 ${escHtml(author.nom)}</span>
+      <span>·</span>
+      <span>🕐 ${fmtDate(q.date_creation)}</span>
+      ${q.est_doublon && q.question_canonique ? `<span>→ Q#${q.question_canonique}</span>` : ''}
+    </div>`;
+
+  // Action buttons
+  card.innerHTML = `
+    <div class="q-card-header">
+      <div class="q-titre">${titreHtml}</div>
+      <div class="q-badges">${badgesHtml}</div>
+    </div>
+    ${contenuHtml}
+    ${metaHtml}
+    <div class="q-actions">
+      ${canEdit ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();startEdit(${q.id})">✏️ Modifier</button>` : ''}
+      ${!q.est_doublon
+        ? `<button class="btn btn-ghost btn-sm" style="color:#f5a623" onclick="event.stopPropagation();showDuplicateModal(${q.id})">⚠️ Doublon</button>`
+        : `<button class="btn btn-ghost btn-sm" style="color:var(--primary)" onclick="event.stopPropagation();showUndup(${q.id})">✅ Retirer doublon</button>`
+      }
+    </div>`;
+
+  return card;
+}
+
+function selectQuestion(id) {
+  // Toggle selection
+  if (S.selectedId === id) {
+    closeDetail();
+    return;
+  }
+  S.selectedId = id;
+  S.editingId  = null;
+
+  // Update card highlight
+  document.querySelectorAll('.q-card').forEach(c => c.classList.remove('selected'));
+  const el = document.getElementById(`qcard-${id}`);
+  if (el) el.classList.add('selected');
+
+  openDetail(id);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  PANNEAU DÉTAIL
+// ════════════════════════════════════════════════════════════════
+function openDetail(id) {
+  const q      = S.questions.find(x => x.id === id);
+  if (!q) return;
+
+  document.getElementById('detail-panel').classList.remove('hidden');
+  document.getElementById('detail-edit').classList.add('hidden');
+  document.getElementById('detail-read').classList.remove('hidden');
+  document.getElementById('detail-title').textContent = q.titre || `Question #${q.id}`;
+
+  const isMe    = S.user && q.auteur_id === S.user.id;
+  const isAdmin = S.user && S.user.role === 'admin';
+  const canEdit = isMe || isAdmin;
+
+  document.getElementById('detail-content').innerHTML =
+    q.contenu ? renderMd(q.contenu) : '<em style="color:var(--text-light)">Pas de contenu détaillé.</em>';
+
+  const actions = document.getElementById('detail-actions');
+  actions.innerHTML = '';
+
+  if (canEdit) {
+    const btnEdit = document.createElement('button');
+    btnEdit.className = 'btn btn-secondary btn-sm';
+    btnEdit.textContent = '✏️ Modifier';
+    btnEdit.onclick = () => startEdit(id);
+    actions.appendChild(btnEdit);
+  }
+
+  if (!q.est_doublon) {
+    const btnDup = document.createElement('button');
+    btnDup.className = 'btn btn-warning btn-sm';
+    btnDup.textContent = '⚠️ Marquer doublon';
+    btnDup.onclick = () => showDuplicateModal(id);
+    actions.appendChild(btnDup);
+  } else {
+    const btnUndup = document.createElement('button');
+    btnUndup.className = 'btn btn-secondary btn-sm';
+    btnUndup.textContent = '✅ Retirer doublon';
+    btnUndup.onclick = () => showUndup(id);
+    actions.appendChild(btnUndup);
+  }
+}
+
+function closeDetail() {
+  S.selectedId = null;
+  S.editingId  = null;
+  document.getElementById('detail-panel').classList.add('hidden');
+  document.querySelectorAll('.q-card').forEach(c => c.classList.remove('selected'));
+}
+
+// ════════════════════════════════════════════════════════════════
+//  ACTIONS — édition question
+// ════════════════════════════════════════════════════════════════
+function startEdit(id) {
+  const q = S.questions.find(x => x.id === id);
+  if (!q) return;
+  S.editingId  = id;
+  S.selectedId = id;
+
+  if (!document.getElementById('detail-panel').classList.contains('hidden') === false) {
+    openDetail(id);
+  }
+
+  document.getElementById('detail-read').classList.add('hidden');
+  document.getElementById('detail-edit').classList.remove('hidden');
+  document.getElementById('edit-titre-input').value   = q.titre   || '';
+  document.getElementById('edit-contenu-input').value = q.contenu || '';
+  document.getElementById('edit-error').classList.add('hidden');
+  document.getElementById('detail-panel').classList.remove('hidden');
+
+  setTimeout(() => document.getElementById('edit-titre-input').focus(), 80);
+}
+
+function cancelEdit() {
+  S.editingId = null;
+  if (S.selectedId) openDetail(S.selectedId);
+  else closeDetail();
+}
+
+async function saveEdit() {
+  const id  = S.editingId;
+  if (!id) return;
+
+  const titre   = document.getElementById('edit-titre-input').value.trim();
+  const contenu = document.getElementById('edit-contenu-input').value.trim();
+  const errEl   = document.getElementById('edit-error');
+
+  if (!titre) {
+    errEl.textContent = 'Le titre ne peut pas être vide.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+  errEl.classList.add('hidden');
+
+  try {
+    await grist.docApi.applyUserActions([[
+      'UpdateRecord', CFG.T_QUESTIONS, id,
+      { [CFG.Q_TITRE]: titre, [CFG.Q_CONTENU]: contenu }
+    ]]);
+    // Update local state
+    const q = S.questions.find(x => x.id === id);
+    if (q) { q.titre = titre; q.contenu = contenu; }
+
+    S.editingId = null;
+    renderList(true);
+    openDetail(id);
+  } catch (err) {
+    errEl.textContent = 'Erreur : ' + (err.message || err);
+    errEl.classList.remove('hidden');
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  ACTIONS — doublon
+// ════════════════════════════════════════════════════════════════
+function showDuplicateModal(id) {
+  S.selectedId = id || S.selectedId;
+  const targetId = id || S.selectedId;
+  if (!targetId) return;
+
+  const sel = document.getElementById('canonical-select');
+  sel.innerHTML = '<option value="">— Aucune —</option>';
+  S.questions.forEach(q => {
+    if (q.id === targetId) return;
+    const o = document.createElement('option');
+    o.value = q.id;
+    o.textContent = q.titre || `Question #${q.id}`;
+    sel.appendChild(o);
+  });
+  sel.dataset.targetId = targetId;
+  document.getElementById('dup-error').classList.add('hidden');
+  openModal('modal-duplicate');
+}
+
+async function confirmMarkDuplicate() {
+  const sel      = document.getElementById('canonical-select');
+  const targetId = parseInt(sel.dataset.targetId);
+  const canonId  = parseInt(sel.value) || null;
+  const errEl    = document.getElementById('dup-error');
+  if (!targetId) return;
+
+  try {
+    const updates = { [CFG.Q_DOUBLON]: true };
+    if (canonId) updates[CFG.Q_CANONIQUE] = canonId;
+    await grist.docApi.applyUserActions([[
+      'UpdateRecord', CFG.T_QUESTIONS, targetId, updates
+    ]]);
+    const q = S.questions.find(x => x.id === targetId);
+    if (q) {
+      q.est_doublon = true;
+      if (canonId) q.question_canonique = canonId;
+    }
+    closeModal('modal-duplicate');
+    renderList(true);
+    if (S.selectedId === targetId) openDetail(targetId);
+  } catch (err) {
+    errEl.textContent = 'Erreur : ' + (err.message || err);
+    errEl.classList.remove('hidden');
+  }
+}
+
+function showUndup(id) {
+  const targetId = id || S.selectedId;
+  if (!targetId) return;
+  document.getElementById('modal-undup').dataset.targetId = targetId;
+  openModal('modal-undup');
+}
+
+async function confirmUndup() {
+  const targetId = parseInt(document.getElementById('modal-undup').dataset.targetId);
+  if (!targetId) return;
+  try {
+    await grist.docApi.applyUserActions([[
+      'UpdateRecord', CFG.T_QUESTIONS, targetId,
+      { [CFG.Q_DOUBLON]: false, [CFG.Q_CANONIQUE]: null }
+    ]]);
+    const q = S.questions.find(x => x.id === targetId);
+    if (q) { q.est_doublon = false; q.question_canonique = null; }
+    closeModal('modal-undup');
+    renderList(true);
+    if (S.selectedId === targetId) openDetail(targetId);
+  } catch (err) {
+    alert('Erreur : ' + (err.message || err));
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  ACTIONS — renommage
+// ════════════════════════════════════════════════════════════════
+function showRenameModal() {
+  if (!S.user) return;
+  const inp = document.getElementById('rename-input');
+  inp.value = S.user.nom;
+  document.getElementById('rename-error').classList.add('hidden');
+  openModal('modal-rename');
+  setTimeout(() => { inp.focus(); inp.select(); }, 80);
+}
+
+async function confirmRename() {
+  const inp     = document.getElementById('rename-input');
+  const errEl   = document.getElementById('rename-error');
+  const newName = inp.value.trim();
+  if (!newName) { errEl.textContent = 'Le nom ne peut pas être vide.'; errEl.classList.remove('hidden'); return; }
+  if (newName === S.user.nom) { closeModal('modal-rename'); return; }
+  try {
+    await grist.docApi.applyUserActions([[
+      'UpdateRecord', CFG.T_USERS, S.user.id, { [CFG.U_NOM]: newName }
+    ]]);
+    S.user.nom = newName;
+    S.users[S.user.id].nom = newName;
+    renderUserBadge();
+    renderList(true);
+    closeModal('modal-rename');
+  } catch (err) {
+    errEl.textContent = 'Erreur : ' + (err.message || err);
+    errEl.classList.remove('hidden');
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  RENDU BADGE UTILISATEUR
+// ════════════════════════════════════════════════════════════════
+function renderUserBadge() {
+  if (!S.user) return;
+  document.getElementById('user-avatar').textContent = initials(S.user.nom);
+  document.getElementById('user-avatar').style.background = strColor(S.user.nom);
+  document.getElementById('user-name').textContent = S.user.nom;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  GESTION DES PANNEAUX ET MODALES
+// ════════════════════════════════════════════════════════════════
+function showPanel(id) {
+  ['panel-loading','panel-error','panel-user-setup','main'].forEach(p => {
+    const el = document.getElementById(p);
+    if (el) el.classList.add('hidden');
+  });
+  const t = document.getElementById(id);
+  if (t) {
+    t.classList.remove('hidden');
+    if (id === 'main') t.style.display = 'flex';
+  }
+}
+
+function openModal(id)  { document.getElementById(id).classList.remove('hidden'); }
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+function overlayClose(e, id) {
+  if (e.target === document.getElementById(id)) closeModal(id);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  UTILITAIRES
+// ════════════════════════════════════════════════════════════════
+function initials(name) {
+  if (!name) return '?';
+  return (name.split(/\s+/).slice(0,2).map(w=>w[0]).join('') || '?').toUpperCase();
+}
+const _palette = ['#16b378','#2196F3','#9C27B0','#FF5722','#009688','#FF9800','#607D8B','#E91E63'];
+function strColor(s) {
+  let h=0; for(let i=0;i<(s||'').length;i++) h=s.charCodeAt(i)+((h<<5)-h);
+  return _palette[Math.abs(h)%_palette.length];
+}
+function fmtDate(ts) {
+  if (!ts) return '';
+  return new Date(ts*1000).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+function escHtml(s) {
+  if (s==null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ════════════════════════════════════════════════════════════════
+//  DÉMARRAGE
+// ════════════════════════════════════════════════════════════════
+window.addEventListener('load', init);
+</script>
+</body>
+</html>
