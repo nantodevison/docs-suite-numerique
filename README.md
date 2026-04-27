@@ -9,12 +9,26 @@ Synchronisation des documents de la **Suite Numérique – Docs** vers **Grist**
 ├── requirements.txt
 ├── .env.example
 ├── .gitignore
-└── src/
-    ├── __init__.py
-    ├── docs_client.py   # Client API Docs
-    ├── grist_client.py  # Client API Grist
-    └── sync.py          # Script principal
+├── src/
+│   ├── __init__.py
+│   ├── docs_client.py   # Client API Docs
+│   ├── grist_client.py  # Client API Grist
+│   └── sync.py          # Script principal
+└── grist_widgets/       # Widgets Grist (HTML/CSS/JS)
+    ├── README.md        # Organisation et workflow
+    ├── parcours-doc/    # Widget 1 – Navigation chapitres
+    ├── echanges/        # Widget 2 – Liste des échanges
+    └── questions/       # Widget 3 – Questions / Réponses
 ```
+
+## Widgets Grist
+
+Le dossier [`grist_widgets/`](grist_widgets/) contient le code source des
+widgets personnalisés Grist (HTML/CSS/JS) utilisés pour visualiser les données
+synchronisées depuis Docs.
+
+Pour les déployer sur une instance Grist (notamment ministérielle sans accès
+internet), consulter [`grist_widgets/README.md`](grist_widgets/README.md).
 
 ## Installation
 

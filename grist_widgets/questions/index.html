@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Questions</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <style>
+    :root {
+      --color-bg: #ffffff;
+      --color-surface: #f5f5f5;
+      --color-border: #e0e0e0;
+      --color-primary: #1a73e8;
+      --color-text: #212121;
+      --color-muted: #757575;
+      --color-q-bg: #e8f0fe;
+      --color-q-border: #1a73e8;
+      --color-r-bg: #f1f8e9;
+      --color-r-border: #558b2f;
+      --radius: 6px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 14px;
+      color: var(--color-text);
+      background: var(--color-bg);
+      padding: 12px;
+    }
+
+    /* ── Barre de recherche ── */
+    #search-bar {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      font-size: 13px;
+      margin-bottom: 10px;
+      outline: none;
+    }
+
+    #search-bar:focus {
+      border-color: var(--color-primary);
+    }
+
+    /* ── Onglets de filtre ── */
+    #tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid var(--color-border);
+      padding-bottom: 4px;
+    }
+
+    .tab {
+      padding: 4px 12px;
+      border-radius: var(--radius) var(--radius) 0 0;
+      font-size: 12px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      background: none;
+      color: var(--color-muted);
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .tab:hover {
+      color: var(--color-primary);
+    }
+
+    .tab.active {
+      color: var(--color-primary);
+      border-color: var(--color-border);
+      border-bottom-color: var(--color-bg);
+      background: var(--color-bg);
+      font-weight: 600;
+    }
+
+    /* ── Liste Q&A ── */
+    #list {
+      overflow-y: auto;
+      max-height: calc(100vh - 90px);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .qa-card {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+
+    .qa-card:hover {
+      border-color: var(--color-primary);
+    }
+
+    .qa-card.active {
+      border-color: var(--color-primary);
+    }
+
+    /* Question */
+    .qa-question {
+      background: var(--color-q-bg);
+      border-left: 3px solid var(--color-q-border);
+      padding: 8px 12px;
+    }
+
+    .qa-question-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 3px;
+    }
+
+    .qa-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-q-border);
+    }
+
+    .qa-label.reponse {
+      color: var(--color-r-border);
+    }
+
+    .qa-date {
+      font-size: 11px;
+      color: var(--color-muted);
+    }
+
+    .qa-auteur {
+      font-size: 11px;
+      color: var(--color-muted);
+      margin-bottom: 3px;
+    }
+
+    .qa-text {
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--color-text);
+    }
+
+    /* Réponse */
+    .qa-reponse {
+      background: var(--color-r-bg);
+      border-left: 3px solid var(--color-r-border);
+      padding: 8px 12px;
+    }
+
+    .qa-card.sans-reponse .qa-reponse {
+      display: none;
+    }
+
+    .badge-sans-reponse {
+      display: inline-block;
+      margin-top: 4px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: 11px;
+      background: #fff8e1;
+      color: #f57f17;
+    }
+
+    #empty {
+      color: var(--color-muted);
+      text-align: center;
+      margin-top: 40px;
+      font-size: 13px;
+    }
+
+    #error {
+      color: #d32f2f;
+      font-size: 12px;
+      padding: 6px;
+      background: #fdecea;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="error"></div>
+  <input id="search-bar" type="search" placeholder="Rechercher une question…" autocomplete="off" />
+  <div id="tabs">
+    <button class="tab active" data-filter="tous">Toutes</button>
+    <button class="tab" data-filter="sans-reponse">Sans réponse</button>
+    <button class="tab" data-filter="avec-reponse">Avec réponse</button>
+  </div>
+  <div id="list"></div>
+  <div id="empty" style="display:none">Aucune question trouvée.</div>
+
+  <script src="widget.js"></script>
+</body>
+</html>
