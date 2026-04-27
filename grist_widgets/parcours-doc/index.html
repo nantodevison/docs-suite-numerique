@@ -1,114 +1,93 @@
-<!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Parcours documentaire</title>
+  <meta charset="UTF-8">
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
-    :root {
-      --color-bg: #ffffff;
-      --color-surface: #f5f5f5;
-      --color-border: #e0e0e0;
-      --color-primary: #1a73e8;
-      --color-text: #212121;
-      --color-muted: #757575;
-      --color-active: #e8f0fe;
-      --color-active-border: #1a73e8;
+    :root{
+      --bg:#f8f9fa;--card:#fff;--border:#dee2e6;--accent:#4361ee;--green:#2d6a4f;
+      --yellow:#e9c46a;--red:#e63946;--grey:#6c757d;--blue:#457b9d;
+      --text:#212529;--text2:#6c757d;--radius:10px;
     }
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);
+        color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    /* CARD */
+    .card{background:var(--card);border-radius:var(--radius);border:1px solid var(--border);
+      padding:14px;margin:10px;flex:1;display:flex;flex-direction:column;min-height:0}
+    .card h3{font-size:15px;margin-bottom:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 
-    body {
-      font-family: "Segoe UI", Arial, sans-serif;
-      font-size: 14px;
-      color: var(--color-text);
-      background: var(--color-bg);
-      padding: 12px;
-    }
+    /* SEARCH BOX */
+    .search-box{position:relative;margin-bottom:6px}
+    .search-box input{width:100%;padding:7px 10px 7px 32px;border:1px solid var(--border);
+      border-radius:6px;font-size:14px;font-family:inherit;background:white}
+    .search-box input:focus{outline:none;border-color:var(--accent)}
+    .search-box::before{content:"🔍";position:absolute;left:10px;top:9px;font-size:14px}
 
-    #search-bar {
-      width: 100%;
-      padding: 8px 10px;
-      border: 1px solid var(--color-border);
-      border-radius: 4px;
-      font-size: 13px;
-      margin-bottom: 10px;
-      outline: none;
-    }
+    /* CHAPITRES LIST */
+    .ch-list{max-height:calc(50vh - 90px);overflow-y:auto;border:1px solid var(--border);
+        border-radius:6px;background:white}
+    .ch-item{padding:7px 10px;border-bottom:1px solid #f0f0f0;cursor:pointer;font-size:13px;
+            display:flex;align-items:center;gap:6px;transition:background .15s}
+    .ch-item:hover{background:#f0f7ff}
+    .ch-item.selected{background:#dbeafe;border-left:3px solid var(--accent)}
+    .ch-num{font-weight:700;color:var(--accent);min-width:50px;flex-shrink:0}
+    .ch-title{flex:1;color:var(--text)}
 
-    #search-bar:focus {
-      border-color: var(--color-primary);
-    }
+    /* PREVIEW */
+    .ch-preview{font-size:13px;color:var(--text2);margin-top:10px;padding:12px;
+            background:#FAFCFF;border-radius:6px;border:1px solid #bdd7f5;display:none;
+            flex:1;overflow-y:auto;line-height:1.6;min-height:0}
+    .ch-preview.visible{display:flex;flex-direction:column}
+    .ch-preview h1,.ch-preview h2,.ch-preview h3{color:var(--text);margin:10px 0 4px;font-size:15px}
+    .ch-preview h1{font-size:16px}.ch-preview h2{font-size:17px}
+    .ch-preview p{margin-bottom:8px}
+    .ch-preview a{color:var(--accent);word-break:break-all}
+    .ch-preview ul,.ch-preview ol{padding-left:18px;margin-bottom:8px}
+    .ch-preview li{margin-bottom:3px}
+    .ch-preview code{background:#f0f0f0;padding:1px 4px;border-radius:3px;font-size:12px}
+    .ch-preview pre{background:#f0f0f0;padding:8px;border-radius:4px;overflow-x:auto;margin-bottom:8px}
+    .ch-preview blockquote{border-left:3px solid var(--border);padding-left:8px;color:var(--grey);margin-bottom:8px}
+    .ch-preview strong{color:var(--text)}
 
-    #tree {
-      overflow-y: auto;
-      max-height: calc(100vh - 60px);
-    }
+    /* EMPTY */
+    .empty{text-align:center;padding:30px;color:var(--text2);font-size:14px}
 
-    .chapter {
-      cursor: pointer;
-      border-radius: 4px;
-      padding: 6px 8px;
-      margin-bottom: 2px;
-      line-height: 1.4;
-      border-left: 3px solid transparent;
-      transition: background 0.15s, border-color 0.15s;
-    }
+    /* BOUTON RESET SELECTION */
+    .btn-reset{display:none;margin-bottom:6px;padding:5px 10px;font-size:11px;
+      border:1px solid var(--border);border-radius:6px;background:#f0f7ff;
+      color:var(--accent);cursor:pointer;width:100%}
+    .btn-reset:hover{background:#dbeafe}
+    .btn-reset.visible{display:block}
 
-    .chapter:hover {
-      background: var(--color-surface);
-    }
+    /* ITEM MASQUÉ */
+    .ch-item.hidden{display:none}
 
-    .chapter.active {
-      background: var(--color-active);
-      border-left-color: var(--color-active-border);
-    }
-
-    .chapter .numero {
-      font-size: 11px;
-      color: var(--color-muted);
-      margin-right: 4px;
-    }
-
-    .chapter .titre {
-      font-weight: 500;
-    }
-
-    /* Indentation par niveau */
-    .level-0 { padding-left: 8px; font-size: 15px; }
-    .level-1 { padding-left: 22px; font-size: 14px; }
-    .level-2 { padding-left: 36px; font-size: 13px; }
-    .level-3 { padding-left: 50px; font-size: 12px; color: var(--color-muted); }
-
-    #empty {
-      color: var(--color-muted);
-      text-align: center;
-      margin-top: 40px;
-      font-size: 13px;
-    }
-
-    #error {
-      color: #d32f2f;
-      font-size: 12px;
-      padding: 6px;
-      background: #fdecea;
-      border-radius: 4px;
-      margin-bottom: 8px;
-      display: none;
-    }
   </style>
 </head>
 <body>
-  <div id="error"></div>
-  <input id="search-bar" type="search" placeholder="Rechercher un chapitre…" autocomplete="off" />
-  <div id="tree"></div>
-  <div id="empty" style="display:none">Aucun chapitre trouvé.</div>
 
-  <script src="widget.js"></script>
+  <div class="card">
+    <h3>📖 Document de Référence 
+      (<a href="https://docs.numerique.gouv.fr/docs/21bb0cdd-638f-4a50-8f3a-03616716771e/" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          style="font-size:11px;color:var(--accent)">
+        Lien vers le document source
+      </a>)
+    </h3>
+    <div class="search-box">
+      <input type="text" id="searchCh" placeholder="Rechercher un chapitre…" oninput="filterCh(this.value)">
+    </div>
+    <button class="btn-reset" id="btnReset" onclick="resetSelection()">
+      ← Voir tous les chapitres
+    </button>
+    <div class="ch-list" id="chList">
+      <div class="empty">⏳ Chargement…</div>
+    </div>
+    <div class="ch-preview" id="chPrev"></div>
+  </div>
+
 </body>
 </html>

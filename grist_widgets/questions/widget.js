@@ -1,188 +1,411 @@
-/* widget.js – Widget Questions / Réponses (Widget 3)
- *
- * Affiche les questions et leurs réponses associées.
- * Supporte le filtrage (toutes / sans réponse / avec réponse) et la recherche.
- * La sélection d'une carte synchronise le curseur Grist.
- *
- * Table attendue : voir README.md
- */
+// ══════════════════════════════════════════════════════
+//  BREVO
+// ══════════════════════════════════════════════════════
+var BREVO_API_KEY = BREVO_KEY ;
+var BREVO_SENDER_EMAIL = EMAIL ;
+var BREVO_SENDER_NAME = 'Plateforme Questions GT "Harmonisation CBS" -- DGPR';
 
-(function () {
-  "use strict";
+// ══════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════
+var users = [];
+var usersMap = {};
+var allQuestions = [];
+var allThemes = [];
+var questionThemeLinks = [];
+var selectedThemes = [];
 
-  /* ── Éléments DOM ───────────────────────────────────────────────── */
-  const listEl   = document.getElementById("list");
-  const searchEl = document.getElementById("search-bar");
-  const emptyEl  = document.getElementById("empty");
-  const errorEl  = document.getElementById("error");
-  const tabsEl   = document.getElementById("tabs");
+grist.ready({ requiredAccess: 'full' });
+init();
 
-  /* ── État local ─────────────────────────────────────────────────── */
-  let allRecords   = [];
-  let selectedId   = null;
-  let activeFilter = "tous"; // "tous" | "sans-reponse" | "avec-reponse"
-
-  /* ── Affichage d'erreur ─────────────────────────────────────────── */
-  function showError(msg) {
-    errorEl.textContent = msg;
-    errorEl.style.display = "block";
-  }
-
-  function hideError() {
-    errorEl.style.display = "none";
-  }
-
-  /* ── Utilitaires ────────────────────────────────────────────────── */
-  function escapeHtml(str) {
-    return String(str || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
-  function formatDate(val) {
-    if (!val) return "";
-    const ts = typeof val === "number" ? val * 1000 : Date.parse(val);
-    if (isNaN(ts)) return String(val);
-    return new Date(ts).toLocaleDateString("fr-FR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
+// ══════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════
+async function init() {
+  try {
+    var u = await grist.docApi.fetchTable('Users');
+    var sel = document.getElementById('selUser');
+    sel.innerHTML = '<option value="">— Votre nom —</option>';
+    for (var i = 0; i < u.id.length; i++) {
+      users.push({ id: u.id[i], nom: u.nom[i], role: u.role[i], email: u.email ? u.email[i] : null });
+      usersMap[u.id[i]] = { nom: u.nom[i], role: u.role[i], email: u.email ? u.email[i] : null };
+      sel.innerHTML += '<option value="'+u.id[i]+'">'+esc(u.nom[i])+' ('+u.role[i]+')</option>';
+    }
+    var fAuteur = document.getElementById('fAuteur');
+    users.forEach(function(u) {
+      fAuteur.innerHTML += '<option value="'+u.id+'">'+esc(u.nom)+'</option>';
     });
+  } catch(e) { console.warn('Users:', e); }
+
+  await loadThemes();
+  await loadQuestions();
+}
+
+// ══════════════════════════════════════════════════════
+//  LOAD THEMES
+// ══════════════════════════════════════════════════════
+async function loadThemes() {
+  try {
+    var t = await grist.docApi.fetchTable('Enum_Themes');
+    allThemes = [];
+    for (var i = 0; i < t.id.length; i++) {
+      allThemes.push({ id: t.id[i], libelle: t.libelle[i] });
+    }
+    allThemes.sort(function(a,b){ return a.libelle.localeCompare(b.libelle); });
+    refreshThemeDatalist();
+    var fTheme = document.getElementById('fTheme');
+    fTheme.innerHTML = '<option value="">— Tous —</option>';
+    allThemes.forEach(function(t) {
+      fTheme.innerHTML += '<option value="'+t.id+'">'+esc(t.libelle)+'</option>';
+    });
+  } catch(e) { console.warn('Themes:', e); }
+
+  try {
+    var l = await grist.docApi.fetchTable('Question_Theme_Link');
+    questionThemeLinks = [];
+    for (var i = 0; i < l.id.length; i++) {
+      questionThemeLinks.push({ id: l.id[i], question: l.question[i], theme: l.theme[i] });
+    }
+  } catch(e) { console.warn('Links:', e); }
+}
+
+function getThemesForQuestion(qId) {
+  return questionThemeLinks
+    .filter(function(l) { return l.question === qId; })
+    .map(function(l) {
+      var t = allThemes.find(function(x) { return x.id === l.theme; });
+      return t || null;
+    })
+    .filter(Boolean);
+}
+
+function refreshThemeDatalist() {
+  var dl = document.getElementById('themeDatalist');
+  dl.innerHTML = allThemes.map(function(t) {
+    return '<option value="'+esc(t.libelle)+'">';
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════
+//  LOAD QUESTIONS
+// ══════════════════════════════════════════════════════
+async function loadQuestions() {
+  try {
+    var q = await grist.docApi.fetchTable('Questions');
+    allQuestions = [];
+    for (var i = 0; i < q.id.length; i++) {
+      allQuestions.push({
+        id: q.id[i],
+        contenu: q.contenu[i],
+        statut: q.statut[i],
+        auteur: q.auteur[i],
+        date: q.date_creation[i]
+      });
+    }
+    allQuestions.sort(function(a,b){ return (b.date||0)-(a.date||0); });
+    renderSearch();
+  } catch(e) {
+    document.getElementById('searchResults').innerHTML =
+      '<div class="empty-search">❌ Erreur de chargement</div>';
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  SEARCH & FILTERS
+// ══════════════════════════════════════════════════════
+function getFiltered() {
+  var txt = document.getElementById('searchInput').value.trim().toLowerCase();
+  var fThemeId = +document.getElementById('fTheme').value || null;
+  var fStatut = document.getElementById('fStatut').value;
+  var fAuteurId = +document.getElementById('fAuteur').value || null;
+
+  return allQuestions.filter(function(q) {
+    if (txt && !(q.contenu||'').toLowerCase().includes(txt)) return false;
+    if (fStatut==='nouvelle') {
+      if (q.statut!=='nouvelle') return false;
+    } else if (fStatut==='en_cours') {
+      if (['qualifiee','en_escalade_expert'].indexOf(q.statut)<0) return false;
+    } else if (fStatut==='validee') {
+      if (q.statut!=='validee') return false;
+    } else if (fStatut==='close') {
+      if (q.statut!=='close') return false;
+    }
+    if (fAuteurId && q.auteur !== fAuteurId) return false;
+    if (fThemeId) {
+      var links = questionThemeLinks.filter(function(l) {
+        return l.question === q.id && l.theme === fThemeId;
+      });
+      if (!links.length) return false;
+    }
+    return true;
+  });
+}
+
+function renderSearch() {
+  var filtered = getFiltered();
+  var countEl = document.getElementById('searchCount');
+  var resEl = document.getElementById('searchResults');
+
+  countEl.textContent = filtered.length + ' question' + (filtered.length > 1 ? 's' : '') +
+    ' sur ' + allQuestions.length;
+
+  if (!filtered.length) {
+    resEl.innerHTML = '<div class="empty-search">✅ Aucune question correspondante — la vôtre est peut-être nouvelle !</div>';
+    return;
   }
 
-  function hasReponse(record) {
-    return Boolean(record.reponse && String(record.reponse).trim().length > 0);
-  }
+  resEl.innerHTML = filtered.map(function(q) {
+    var st = q.statut || 'nouvelle';
+    var dt = q.date ? new Date(q.date*1000).toLocaleDateString('fr-FR') : '';
+    var auteurNom = usersMap[q.auteur] ? esc(usersMap[q.auteur].nom) : '';
+    var themes = getThemesForQuestion(q.id);
+    var themesHtml = themes.map(function(t) {
+      return '<span class="ri-theme">'+esc(t.libelle)+'</span>';
+    }).join('');
 
-  /* ── Rendu de la liste ──────────────────────────────────────────── */
-  function render(records) {
-    listEl.innerHTML = "";
+    return '<div class="ri">' +
+      '<div class="ri-top">' +
+        '<span class="ri-ref">Q-'+String(q.id).padStart(4,'0')+'</span>' +
+        '<span class="st st-'+st+'">'+st+'</span>' +
+        themesHtml +
+      '</div>' +
+      '<div class="ri-contenu">'+esc((q.contenu||'').substring(0,120))+(q.contenu&&q.contenu.length>120?'…':'')+'</div>' +
+      '<div class="ri-bottom">' +
+        (auteurNom ? '<span class="ri-date">👤 '+auteurNom+'</span>' : '') +
+        '<span class="ri-date">📅 '+dt+'</span>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
 
-    const query = (searchEl.value || "").toLowerCase().trim();
+function clearFilters() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('fTheme').value = '';
+  document.getElementById('fStatut').value = '';
+  document.getElementById('fAuteur').value = '';
+  renderSearch();
+}
 
-    let filtered = records;
+// ══════════════════════════════════════════════════════
+//  THEME INPUT (pour la soumission)
+// ══════════════════════════════════════════════════════
+function addTheme() {
+  var input = document.getElementById('themeInput');
+  var val = input.value.trim();
+  if (!val) return;
+  if (selectedThemes.indexOf(val) >= 0) { input.value = ''; return; }
+  selectedThemes.push(val);
+  input.value = '';
+  renderThemeTags();
+}
 
-    // Filtre onglet
-    if (activeFilter === "sans-reponse") {
-      filtered = filtered.filter((r) => !hasReponse(r));
-    } else if (activeFilter === "avec-reponse") {
-      filtered = filtered.filter((r) => hasReponse(r));
+function removeTheme(idx) {
+  selectedThemes.splice(idx, 1);
+  renderThemeTags();
+}
+
+function renderThemeTags() {
+  document.getElementById('themeTags').innerHTML = selectedThemes.map(function(t, i) {
+    return '<span class="theme-tag">'+esc(t)+
+      '<span class="remove" onclick="removeTheme('+i+')">×</span></span>';
+  }).join('');
+}
+
+document.getElementById('themeInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') { e.preventDefault(); addTheme(); }
+});
+
+// ══════════════════════════════════════════════════════
+//  SUBMIT
+// ══════════════════════════════════════════════════════
+async function submitQ() {
+  var uid = +document.getElementById('selUser').value;
+  var txt = document.getElementById('inQ').value.trim();
+  if (!uid) { alert('Sélectionnez votre nom'); return; }
+  if (!txt) { alert('Rédigez votre question'); return; }
+
+  document.getElementById('btnSub').disabled = true;
+
+  try {
+    var res = await grist.docApi.applyUserActions([
+      ['AddRecord', 'Questions', null, {
+        contenu: txt,
+        auteur: uid,
+        date_creation: Date.now() / 1000,
+        statut: 'nouvelle',
+        couverture_doc: 'a_evaluer',
+        est_doublon: false,
+        escaladee: false,
+        validee_par_utilisateur: false
+      }]
+    ]);
+
+    var newId = res.retValues[0];
+    var ref = 'Q-' + String(newId).padStart(4, '0');
+
+    for (var i = 0; i < selectedThemes.length; i++) {
+      var libelle = selectedThemes[i];
+      var existing = allThemes.find(function(t) {
+        return t.libelle.toLowerCase() === libelle.toLowerCase();
+      });
+      var themeId;
+      if (existing) {
+        themeId = existing.id;
+      } else {
+        var tRes = await grist.docApi.applyUserActions([
+          ['AddRecord', 'Enum_Themes', null, { libelle: libelle }]
+        ]);
+        themeId = tRes.retValues[0];
+        allThemes.push({ id: themeId, libelle: libelle });
+      }
+      await grist.docApi.applyUserActions([
+        ['AddRecord', 'Question_Theme_Link', null, { question: newId, theme: themeId }]
+      ]);
     }
 
-    // Filtre texte
-    if (query) {
-      filtered = filtered.filter(
-        (r) =>
-          (r.question || "").toLowerCase().includes(query) ||
-          (r.reponse  || "").toLowerCase().includes(query) ||
-          (r.auteur   || "").toLowerCase().includes(query)
-      );
-    }
+    selectedThemes = [];
+    renderThemeTags();
+    refreshThemeDatalist();
+    document.getElementById('inQ').value = '';
+    document.getElementById('modalRef').textContent = ref;
+    document.getElementById('modal').style.display = 'flex';
 
-    if (filtered.length === 0) {
-      emptyEl.style.display = "block";
-      return;
-    }
-    emptyEl.style.display = "none";
+    await loadThemes();
+    await loadQuestions();
 
-    filtered.forEach((record) => {
-      const rowId    = record.id;
-      const question = record.question || "(question vide)";
-      const reponse  = record.reponse  || "";
-      const auteur   = record.auteur   || "";
-      const dateQ    = formatDate(record.date_question);
-      const dateR    = formatDate(record.date_reponse);
-      const avecRep  = hasReponse(record);
+    await notifyAdminsNewQuestion(newId, ref, uid, txt);
 
-      const card = document.createElement("div");
-      card.className = `qa-card${avecRep ? "" : " sans-reponse"}${rowId === selectedId ? " active" : ""}`;
-      card.dataset.rowId = rowId;
-
-      card.innerHTML = `
-        <div class="qa-question">
-          <div class="qa-question-header">
-            <span class="qa-label">Question</span>
-            ${dateQ ? `<span class="qa-date">${escapeHtml(dateQ)}</span>` : ""}
-          </div>
-          ${auteur ? `<div class="qa-auteur">${escapeHtml(auteur)}</div>` : ""}
-          <div class="qa-text">${escapeHtml(question)}</div>
-          ${!avecRep ? '<span class="badge-sans-reponse">⏳ Sans réponse</span>' : ""}
-        </div>
-        <div class="qa-reponse">
-          <div class="qa-question-header">
-            <span class="qa-label reponse">Réponse</span>
-            ${dateR ? `<span class="qa-date">${escapeHtml(dateR)}</span>` : ""}
-          </div>
-          <div class="qa-text">${escapeHtml(reponse)}</div>
-        </div>
-      `;
-
-      card.addEventListener("click", () => selectRecord(rowId));
-      listEl.appendChild(card);
-    });
+  } catch(e) {
+    alert('❌ Erreur: ' + e.message);
   }
 
-  /* ── Sélection d'un enregistrement ─────────────────────────────── */
-  function selectRecord(rowId) {
-    selectedId = rowId;
-    document.querySelectorAll(".qa-card").forEach((el) => {
-      el.classList.toggle("active", Number(el.dataset.rowId) === rowId);
-    });
-    grist.setCursorPos({ rowId }).catch(() => {});
+  document.getElementById('btnSub').disabled = false;
+}
+
+// ══════════════════════════════════════════════════════
+//  NOTIFY ADMINS
+// ══════════════════════════════════════════════════════
+async function notifyAdminsNewQuestion(qId, ref, authorId, contenu) {
+  var author = usersMap[authorId];
+  var authorName = author ? author.nom : 'Un utilisateur';
+  var now = new Date().toLocaleString('fr-FR');
+
+  var recipients = [];
+  users.forEach(function(u) {
+    if (u.role === 'admin' && u.id !== authorId && u.email) {
+      recipients.push({ email: u.email, name: u.nom });
+    }
+  });
+
+  if (!recipients.length) {
+    console.warn('Aucun admin destinataire trouvé');
+    return;
   }
 
-  /* ── Initialisation Grist ───────────────────────────────────────── */
+  var subject = '[GT Harmonisation CBS] Nouvelle question ' + ref + ' posée';
 
-  // IMPORTANT : appeler grist.ready() EN PREMIER, avant tout autre appel API.
-  // Sans cela, Grist retourne l'erreur RPC_UNKNOWN_FORWARD_DEST.
-  grist.ready({
-    requiredAccess: "read table",
-    columns: [
-      { name: "question",      title: "Question",             type: "Text" },
-      { name: "reponse",       title: "Réponse",              type: "Text",    optional: true },
-      { name: "auteur",        title: "Auteur de la question",type: "Text",    optional: true },
-      { name: "date_question", title: "Date de la question",  type: "Date",    optional: true },
-      { name: "date_reponse",  title: "Date de la réponse",   type: "Date",    optional: true },
-      { name: "chapitre_ref",  title: "Chapitre lié",         type: "Integer", optional: true },
-    ],
-  });
+  var htmlContent =
+    '<p>Bonjour,</p>' +
+    '<p>La question <strong>' + esc(ref) + '</strong> a été posée par <strong>' + esc(authorName) + '</strong> le ' + esc(now) + '.</p>' +
+    '<p>La question est :</p>' +
+    '<blockquote style="border-left:3px solid #4361ee;padding:8px 12px;margin:12px 0;color:#1e293b;background:#f8f9fa;border-radius:4px">' +
+      esc(contenu) +
+    '</blockquote>' +
+    '<p style="margin-top:20px">Cordialement<br>' +
+      '<strong>L\'équipe GT Harmonisation</strong></p>' +
+    '<hr style="margin:20px 0;border:none;border-top:1px solid #ddd">' +
+    '<p style="font-size:11px;color:#999">Cet email est automatique, merci de ne pas y répondre.</p>';
 
-  // Réception des données
-  grist.onRecords(function (records) {
-    hideError();
-    // Tri : sans réponse en premier, puis par date de question décroissante
-    allRecords = (records || []).slice().sort((a, b) => {
-      const aRep = hasReponse(a) ? 1 : 0;
-      const bRep = hasReponse(b) ? 1 : 0;
-      if (aRep !== bRep) return aRep - bRep;
-      const dA = Number(a.date_question) || 0;
-      const dB = Number(b.date_question) || 0;
-      return dB - dA;
-    });
-    render(allRecords);
-  });
+  for (var j = 0; j < recipients.length; j++) {
+    try {
+      var resp = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'api-key': BREVO_API_KEY,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          sender: { name: BREVO_SENDER_NAME, email: BREVO_SENDER_EMAIL },
+          to: [{ email: recipients[j].email, name: recipients[j].name }],
+          subject: subject,
+          htmlContent: htmlContent
+        })
+      });
+      if (!resp.ok) {
+        var err = await resp.json();
+        console.warn('Brevo error:', err.message || resp.statusText);
+      }
+    } catch(e) {
+      console.warn('Mail error:', e);
+    }
+  }
+}
 
-  // Synchronisation curseur Grist
-  grist.onRecord(function (record) {
-    if (!record) return;
-    selectedId = record.id;
-    document.querySelectorAll(".qa-card").forEach((el) => {
-      el.classList.toggle("active", Number(el.dataset.rowId) === selectedId);
-    });
-  });
+// ══════════════════════════════════════════════════════
+//  HELPERS
+// ═════════════════════════════════════════════════���════
+function esc(t) {
+  var d = document.createElement('div');
+  d.textContent = t || '';
+  return d.innerHTML;
+}
 
-  /* ── Onglets ────────────────────────────────────────────────────── */
-  tabsEl.addEventListener("click", (e) => {
-    const tab = e.target.closest(".tab");
-    if (!tab) return;
-    tabsEl.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-    tab.classList.add("active");
-    activeFilter = tab.dataset.filter;
-    render(allRecords);
-  });
+// ══════════════════════════════════════════════════════
+//  MARKDOWN TOOLBAR
+// ══════════════════════════════════════════════════════
+function mdWrap(prefix, suffix) {
+  var ta = document.getElementById('inQ');
+  var start = ta.selectionStart, end = ta.selectionEnd;
+  var sel = ta.value.substring(start, end);
+  var replacement = prefix + (sel || 'texte') + suffix;
+  ta.value = ta.value.substring(0, start) + replacement + ta.value.substring(end);
+  ta.focus();
+  ta.selectionStart = start + prefix.length;
+  ta.selectionEnd = start + prefix.length + (sel || 'texte').length;
+}
 
-  /* ── Recherche en temps réel ────────────────────────────────────── */
-  searchEl.addEventListener("input", () => render(allRecords));
-}());
+function mdLine(prefix) {
+  var ta = document.getElementById('inQ');
+  var start = ta.selectionStart;
+  var lineStart = ta.value.lastIndexOf('\n', start - 1) + 1;
+  ta.value = ta.value.substring(0, lineStart) + prefix + ta.value.substring(lineStart);
+  ta.focus();
+  ta.selectionStart = ta.selectionEnd = start + prefix.length;
+}
+
+function togglePreview() {
+  var ta = document.getElementById('inQ');
+  var prev = document.getElementById('mdPreview');
+  var btn = document.getElementById('btnPreview');
+  if (prev.style.display === 'none') {
+    prev.innerHTML = renderMarkdown(ta.value);
+    prev.style.display = 'block';
+    ta.style.display = 'none';
+    btn.textContent = '✏️ Éditer';
+  } else {
+    prev.style.display = 'none';
+    ta.style.display = 'block';
+    btn.textContent = '👁 Aperçu';
+  }
+}
+
+function renderMarkdown(txt) {
+  if (!txt) return '<em style="color:#999">Rien à afficher…</em>';
+  var h = txt
+    .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+    .replace(/\n{2,}/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+  return '<p>' + h + '</p>';
+}

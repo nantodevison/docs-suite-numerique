@@ -1,130 +1,146 @@
-/* widget.js – Widget Parcours documentaire (Widget 1)
- *
- * Affiche l'arborescence des chapitres issus de la table Grist (Chapitres).
- * Lorsqu'un chapitre est sélectionné dans le widget, la ligne correspondante
- * est sélectionnée dans Grist (curseur), permettant aux autres widgets de
- * réagir via onRecord.
- *
- * Table attendue : voir README.md
- */
+// ══════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════
+var chapitres = [];
+var selectedChId = null;
 
-(function () {
-  "use strict";
+// ══════════════════════════════════════════════════════
+//  GRIST INIT
+// ══════════════════════════════════════════════════════
+grist.ready({ requiredAccess: 'full' });
+loadChapitres();
 
-  /* ── Éléments DOM ───────────────────────────────────────────────── */
-  const treeEl   = document.getElementById("tree");
-  const searchEl = document.getElementById("search-bar");
-  const emptyEl  = document.getElementById("empty");
-  const errorEl  = document.getElementById("error");
-
-  /* ── État local ─────────────────────────────────────────────────── */
-  let allRecords   = [];   // tous les enregistrements Grist
-  let selectedId   = null; // rowId actuellement sélectionné
-
-  /* ── Affichage d'erreur ─────────────────────────────────────────── */
-  function showError(msg) {
-    errorEl.textContent = msg;
-    errorEl.style.display = "block";
-  }
-
-  function hideError() {
-    errorEl.style.display = "none";
-  }
-
-  /* ── Rendu de l'arbre ───────────────────────────────────────────── */
-  function render(records) {
-    treeEl.innerHTML = "";
-    const query = (searchEl.value || "").toLowerCase().trim();
-
-    const filtered = query
-      ? records.filter(
-          (r) =>
-            (r.titre || "").toLowerCase().includes(query) ||
-            (r.numero || "").toLowerCase().includes(query)
-        )
-      : records;
-
-    if (filtered.length === 0) {
-      emptyEl.style.display = "block";
-      return;
-    }
-    emptyEl.style.display = "none";
-
-    filtered.forEach((record) => {
-      const niveau  = Math.min(Number(record.niveau) || 0, 3);
-      const numero  = record.numero  || "";
-      const titre   = record.titre_propre || record.titre || "(sans titre)";
-      const rowId   = record.id;
-
-      const div = document.createElement("div");
-      div.className = `chapter level-${niveau}${rowId === selectedId ? " active" : ""}`;
-      div.dataset.rowId = rowId;
-
-      div.innerHTML = `<span class="numero">${escapeHtml(numero)}</span>`
-                    + `<span class="titre">${escapeHtml(titre)}</span>`;
-
-      div.addEventListener("click", () => selectRecord(rowId));
-      treeEl.appendChild(div);
+// ══════════════════════════════════════════════════════
+//  LOAD CHAPITRES
+// ══════════════════════════════════════════════════════
+async function loadChapitres() {
+  try {
+    var c = await grist.docApi.fetchTable('Chapitres');
+    chapitres = c.id.map(function(_, i){
+      return {
+        id: c.id[i],
+        numero: c.numero[i],
+        titre: c.titre[i],
+        contenu: c.contenu[i],
+        niveau: c.niveau[i],
+        document: c.document[i],
+        url: c.url[i]
+      };
     });
-  }
-
-  /* ── Sélection d'un enregistrement ─────────────────────────────── */
-  function selectRecord(rowId) {
-    selectedId = rowId;
-    // Met à jour la sélection visuelle
-    document.querySelectorAll(".chapter").forEach((el) => {
-      el.classList.toggle("active", Number(el.dataset.rowId) === rowId);
+    
+    // Sort by numero (natural sort for "1.2.3" style)
+    chapitres.sort(function(a, b){
+      return (a.numero||'').localeCompare(b.numero||'', undefined, {numeric: true});
     });
-    // Synchronise le curseur Grist
-    grist.setCursorPos({ rowId }).catch(() => {});
+    
+    renderCh(chapitres);
+  } catch(e) {
+    document.getElementById('chList').innerHTML =
+      '<div class="empty">❌ Erreur: '+esc(e.message)+'</div>';
   }
+}
 
-  /* ── Utilitaire ─────────────────────────────────────────────────── */
-  function escapeHtml(str) {
-    return String(str || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+// ══════════════════════════════════════════════════════
+//  RENDER CHAPITRES
+// ══════════════════════════════════════════════════════
+function renderCh(list) {
+  var el = document.getElementById('chList');
+  
+  if (!list.length) {
+    el.innerHTML = '<div class="empty">✅ Aucun chapitre trouvé</div>';
+    return;
   }
+  
+  el.innerHTML = list.map(function(c) {
+    // Indent based on level (1=10px, 2=24px, 3=38px, etc.)
+    var pad = 10 + Math.min((c.niveau||1)-1, 3) * 14;
+    var isSelected = selectedChId === c.id ? ' selected' : '';
+    
+    var urlLink = c.url
+      ? '<a href="'+c.url+'" target="_blank" rel="noopener noreferrer" '+
+        'onclick="event.stopPropagation()" '+
+        'style="font-size:10px;color:var(--accent);white-space:nowrap;flex-shrink:0">↗ source</a>'
+      : '';
+    return '<div class="ch-item'+isSelected+'" style="padding-left:'+pad+'px" '+
+      'onclick="selectCh('+c.id+')" data-id="'+c.id+'">'+
+      '<span class="ch-num">§'+(c.numero||'')+'</span>'+
+      '<span class="ch-title">'+esc(c.titre||'Sans titre')+'</span>'+
+      urlLink+'</div>';
+  }).join('');
+}
 
-  /* ── Initialisation Grist ───────────────────────────────────────── */
+// ══════════════════════════════════════════════════════
+//  FILTER CHAPITRES
+// ══════════════════════════════════════════════════════
+function filterCh(query) {
+  var q = query.toLowerCase().trim();
+  
+  if (!q) {
+    renderCh(chapitres);
+    return;
+  }
+  
+  var filtered = chapitres.filter(function(c){
+    var searchable = (c.numero||'') + ' ' + (c.titre||'') + ' ' + (c.contenu||'');
+    return searchable.toLowerCase().includes(q);
+  });
+  
+  renderCh(filtered);
+}
 
-  // IMPORTANT : appeler grist.ready() EN PREMIER, avant tout autre appel API.
-  // Sans cela, Grist retourne l'erreur RPC_UNKNOWN_FORWARD_DEST.
-  grist.ready({
-    requiredAccess: "read table",
-    columns: [
-      { name: "titre",        title: "Titre complet",   type: "Text" },
-      { name: "titre_propre", title: "Titre (sans emoji)", type: "Text", optional: true },
-      { name: "numero",       title: "Numéro",          type: "Text", optional: true },
-      { name: "niveau",       title: "Niveau",          type: "Numeric" },
-      { name: "ordre",        title: "Ordre",           type: "Numeric", optional: true },
-      { name: "url",          title: "URL",             type: "Text", optional: true },
-    ],
+// ══════════════════════════════════════════════════════
+//  SELECT CHAPITRE
+// ══════════════════════════════════════════════════════
+function selectCh(id) {
+  selectedChId = id;
+  var ch = chapitres.find(function(c){ return c.id === id; });
+  if (!ch) return;
+
+  // Masquer tous les items sauf le sélectionné
+  document.querySelectorAll('.ch-item').forEach(function(el){
+    var isSelected = +el.dataset.id === id;
+    el.classList.toggle('selected', isSelected);
+    el.classList.toggle('hidden', !isSelected);
   });
 
-  // Réception de tous les enregistrements de la vue courante
-  grist.onRecords(function (records) {
-    hideError();
-    // Trier par ordre puis par niveau pour l'affichage hiérarchique
-    allRecords = (records || []).slice().sort((a, b) => {
-      const ordA = Number(a.ordre) || 0;
-      const ordB = Number(b.ordre) || 0;
-      return ordA - ordB;
-    });
-    render(allRecords);
+  // Afficher le bouton reset
+  document.getElementById('btnReset').classList.add('visible');
+
+  // Render preview en Markdown
+  var preview = document.getElementById('chPrev');
+  var sourceLink = ch.url
+    ? ' <a href="'+ch.url+'" target="_blank" rel="noopener noreferrer" '+
+      'style="font-size:11px;color:var(--accent);font-weight:400">(Lien vers la source)</a>'
+    : '';
+  console.log('url du chapitre:', ch.url, '| type:', typeof ch.url);
+  var header = '<div style="font-weight:700;color:var(--text);font-size:12px;margin-bottom:8px;'+
+    'padding-bottom:6px;border-bottom:1px solid #f5e6a3;display:flex;align-items:baseline;gap:12px">'+
+    '<span>§'+ch.numero+' '+esc(ch.titre)+'</span>'+sourceLink+'</div>';
+  var body = marked.parse(ch.contenu || 'Aucun contenu disponible');
+  preview.innerHTML = header + body;
+  preview.classList.add('visible');
+
+  preview.scrollTop = 0;
+}
+
+function resetSelection() {
+  selectedChId = null;
+
+  // Ré-afficher tous les items
+  document.querySelectorAll('.ch-item').forEach(function(el){
+    el.classList.remove('selected', 'hidden');
   });
 
-  // Réaction au changement de curseur (autre widget ou Grist lui-même)
-  grist.onRecord(function (record) {
-    if (!record) return;
-    selectedId = record.id;
-    document.querySelectorAll(".chapter").forEach((el) => {
-      el.classList.toggle("active", Number(el.dataset.rowId) === selectedId);
-    });
-  });
+  // Masquer le bouton reset et le preview
+  document.getElementById('btnReset').classList.remove('visible');
+  document.getElementById('chPrev').classList.remove('visible');
+}
 
-  /* ── Recherche en temps réel ────────────────────────────────────── */
-  searchEl.addEventListener("input", () => render(allRecords));
-}());
+// ══════════════════════════════════════════════════════
+//  HELPERS
+// ══════════════════════════════════════════════════════
+function esc(t) {
+  var d = document.createElement('div');
+  d.textContent = t||'';
+  return d.innerHTML;
+}
