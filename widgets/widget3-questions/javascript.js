@@ -1,376 +1,411 @@
-<html>
-<head>
-  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-  <style>
-    :root{--bg:#f8f9fa;--card:#fff;--border:#dee2e6;--accent:#4361ee;
-          --green:#2d6a4f;--text:#212529;--text2:#6c757d;--radius:10px}
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:system-ui,sans-serif;background:var(--bg);height:100vh;overflow-y:auto;padding:14px;font-size:13px}
-    .card{background:var(--card);border-radius:var(--radius);border:1px solid var(--border);
-          padding:16px;margin-bottom:10px}
-    h2{font-size:17px;margin-bottom:4px;display:flex;align-items:center;gap:8px}
-    .card-subtitle{font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.4}
-    label{display:block;font-size:13px;font-weight:600;margin:8px 0 3px;color:var(--text2)}
-    select,textarea{width:100%;padding:8px 10px;border:1px solid var(--border);
-      border-radius:8px;font-size:13px;font-family:inherit;background:white}
-    textarea{min-height:100px;resize:vertical}
-    select:focus,textarea:focus{outline:none;border-color:var(--accent)}
-    .btn{padding:10px 20px;border:none;border-radius:8px;font-size:13px;font-weight:600;
-        cursor:pointer;width:100%;margin-top:8px}
-    .btn-primary{background:var(--accent);color:white}
-    .btn-primary:hover{background:#3a56d4}
-    .btn:disabled{opacity:.5;cursor:not-allowed}
-    .help{font-size:13px;color:var(--text2);margin-top:4px;line-height:1.4}
+// ══════════════════════════════════════════════════════
+//  BREVO
+// ══════════════════════════════════════════════════════
+var BREVO_API_KEY = BREVO_KEY;
+var BREVO_SENDER_EMAIL = EMAIL;
+var BREVO_SENDER_NAME = 'Plateforme Questions GT "Harmonisation CBS" -- DGPR';
 
-    /* THEME INPUT */
-    .theme-input-zone{margin-bottom:10px}
-    .theme-tags{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;min-height:4px}
-    .theme-tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;
-      background:#e0e7ff;color:#3730a3;border-radius:8px;font-size:13px;font-weight:600}
-    .theme-tag .remove{cursor:pointer;font-size:15px;color:#6366f1;font-weight:700}
-    .theme-tag .remove:hover{color:#dc2626}
-    #themeInput{flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px}
+// ══════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════
+var users = [];
+var usersMap = {};
+var allQuestions = [];
+var allThemes = [];
+var questionThemeLinks = [];
+var selectedThemes = [];
 
-    /* LAYOUT 2 COLONNES */
-    .search-layout{
-      display:flex;
-      gap:12px;
-      align-items:flex-start;
+grist.ready({ requiredAccess: 'full' });
+init();
+
+// ══════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════
+async function init() {
+  try {
+    var u = await grist.docApi.fetchTable('Users');
+    var sel = document.getElementById('selUser');
+    sel.innerHTML = '<option value="">— Votre nom —</option>';
+    for (var i = 0; i < u.id.length; i++) {
+      users.push({ id: u.id[i], nom: u.nom[i], role: u.role[i], email: u.email ? u.email[i] : null });
+      usersMap[u.id[i]] = { nom: u.nom[i], role: u.role[i], email: u.email ? u.email[i] : null };
+      sel.innerHTML += '<option value="'+u.id[i]+'">'+esc(u.nom[i])+' ('+u.role[i]+')</option>';
+    }
+    var fAuteur = document.getElementById('fAuteur');
+    users.forEach(function(u) {
+      fAuteur.innerHTML += '<option value="'+u.id+'">'+esc(u.nom)+'</option>';
+    });
+  } catch(e) { console.warn('Users:', e); }
+
+  await loadThemes();
+  await loadQuestions();
+}
+
+// ══════════════════════════════════════════════════════
+//  LOAD THEMES
+// ══════════════════════════════════════════════════════
+async function loadThemes() {
+  try {
+    var t = await grist.docApi.fetchTable('Enum_Themes');
+    allThemes = [];
+    for (var i = 0; i < t.id.length; i++) {
+      allThemes.push({ id: t.id[i], libelle: t.libelle[i] });
+    }
+    allThemes.sort(function(a,b){ return a.libelle.localeCompare(b.libelle); });
+    refreshThemeDatalist();
+    var fTheme = document.getElementById('fTheme');
+    fTheme.innerHTML = '<option value="">— Tous —</option>';
+    allThemes.forEach(function(t) {
+      fTheme.innerHTML += '<option value="'+t.id+'">'+esc(t.libelle)+'</option>';
+    });
+  } catch(e) { console.warn('Themes:', e); }
+
+  try {
+    var l = await grist.docApi.fetchTable('Question_Theme_Link');
+    questionThemeLinks = [];
+    for (var i = 0; i < l.id.length; i++) {
+      questionThemeLinks.push({ id: l.id[i], question: l.question[i], theme: l.theme[i] });
+    }
+  } catch(e) { console.warn('Links:', e); }
+}
+
+function getThemesForQuestion(qId) {
+  return questionThemeLinks
+    .filter(function(l) { return l.question === qId; })
+    .map(function(l) {
+      var t = allThemes.find(function(x) { return x.id === l.theme; });
+      return t || null;
+    })
+    .filter(Boolean);
+}
+
+function refreshThemeDatalist() {
+  var dl = document.getElementById('themeDatalist');
+  dl.innerHTML = allThemes.map(function(t) {
+    return '<option value="'+esc(t.libelle)+'">';
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════
+//  LOAD QUESTIONS
+// ══════════════════════════════════════════════════════
+async function loadQuestions() {
+  try {
+    var q = await grist.docApi.fetchTable('Questions');
+    allQuestions = [];
+    for (var i = 0; i < q.id.length; i++) {
+      allQuestions.push({
+        id: q.id[i],
+        contenu: q.contenu[i],
+        statut: q.statut[i],
+        auteur: q.auteur[i],
+        date: q.date_creation[i]
+      });
+    }
+    allQuestions.sort(function(a,b){ return (b.date||0)-(a.date||0); });
+    renderSearch();
+  } catch(e) {
+    document.getElementById('searchResults').innerHTML =
+      '<div class="empty-search">❌ Erreur de chargement</div>';
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  SEARCH & FILTERS
+// ══════════════════════════════════════════════════════
+function getFiltered() {
+  var txt = document.getElementById('searchInput').value.trim().toLowerCase();
+  var fThemeId = +document.getElementById('fTheme').value || null;
+  var fStatut = document.getElementById('fStatut').value;
+  var fAuteurId = +document.getElementById('fAuteur').value || null;
+
+  return allQuestions.filter(function(q) {
+    if (txt && !(q.contenu||'').toLowerCase().includes(txt)) return false;
+    if (fStatut==='nouvelle') {
+      if (q.statut!=='nouvelle') return false;
+    } else if (fStatut==='en_cours') {
+      if (['qualifiee','en_escalade_expert'].indexOf(q.statut)<0) return false;
+    } else if (fStatut==='validee') {
+      if (q.statut!=='validee') return false;
+    } else if (fStatut==='close') {
+      if (q.statut!=='close') return false;
+    }
+    if (fAuteurId && q.auteur !== fAuteurId) return false;
+    if (fThemeId) {
+      var links = questionThemeLinks.filter(function(l) {
+        return l.question === q.id && l.theme === fThemeId;
+      });
+      if (!links.length) return false;
+    }
+    return true;
+  });
+}
+
+function renderSearch() {
+  var filtered = getFiltered();
+  var countEl = document.getElementById('searchCount');
+  var resEl = document.getElementById('searchResults');
+
+  countEl.textContent = filtered.length + ' question' + (filtered.length > 1 ? 's' : '') +
+    ' sur ' + allQuestions.length;
+
+  if (!filtered.length) {
+    resEl.innerHTML = '<div class="empty-search">✅ Aucune question correspondante — la vôtre est peut-être nouvelle !</div>';
+    return;
+  }
+
+  resEl.innerHTML = filtered.map(function(q) {
+    var st = q.statut || 'nouvelle';
+    var dt = q.date ? new Date(q.date*1000).toLocaleDateString('fr-FR') : '';
+    var auteurNom = usersMap[q.auteur] ? esc(usersMap[q.auteur].nom) : '';
+    var themes = getThemesForQuestion(q.id);
+    var themesHtml = themes.map(function(t) {
+      return '<span class="ri-theme">'+esc(t.libelle)+'</span>';
+    }).join('');
+
+    return '<div class="ri">' +
+      '<div class="ri-top">' +
+        '<span class="ri-ref">Q-'+String(q.id).padStart(4,'0')+'</span>' +
+        '<span class="st st-'+st+'">'+st+'</span>' +
+        themesHtml +
+      '</div>' +
+      '<div class="ri-contenu">'+esc((q.contenu||'').substring(0,120))+(q.contenu&&q.contenu.length>120?'…':'')+'</div>' +
+      '<div class="ri-bottom">' +
+        (auteurNom ? '<span class="ri-date">👤 '+auteurNom+'</span>' : '') +
+        '<span class="ri-date">📅 '+dt+'</span>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function clearFilters() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('fTheme').value = '';
+  document.getElementById('fStatut').value = '';
+  document.getElementById('fAuteur').value = '';
+  renderSearch();
+}
+
+// ══════════════════════════════════════════════════════
+//  THEME INPUT (pour la soumission)
+// ══════════════════════════════════════════════════════
+function addTheme() {
+  var input = document.getElementById('themeInput');
+  var val = input.value.trim();
+  if (!val) return;
+  if (selectedThemes.indexOf(val) >= 0) { input.value = ''; return; }
+  selectedThemes.push(val);
+  input.value = '';
+  renderThemeTags();
+}
+
+function removeTheme(idx) {
+  selectedThemes.splice(idx, 1);
+  renderThemeTags();
+}
+
+function renderThemeTags() {
+  document.getElementById('themeTags').innerHTML = selectedThemes.map(function(t, i) {
+    return '<span class="theme-tag">'+esc(t)+
+      '<span class="remove" onclick="removeTheme('+i+')">×</span></span>';
+  }).join('');
+}
+
+document.getElementById('themeInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') { e.preventDefault(); addTheme(); }
+});
+
+// ══════════════════════════════════════════════════════
+//  SUBMIT
+// ══════════════════════════════════════════════════════
+async function submitQ() {
+  var uid = +document.getElementById('selUser').value;
+  var txt = document.getElementById('inQ').value.trim();
+  if (!uid) { alert('Sélectionnez votre nom'); return; }
+  if (!txt) { alert('Rédigez votre question'); return; }
+
+  document.getElementById('btnSub').disabled = true;
+
+  try {
+    var res = await grist.docApi.applyUserActions([
+      ['AddRecord', 'Questions', null, {
+        contenu: txt,
+        auteur: uid,
+        date_creation: Date.now() / 1000,
+        statut: 'nouvelle',
+        couverture_doc: 'a_evaluer',
+        est_doublon: false,
+        escaladee: false,
+        validee_par_utilisateur: false
+      }]
+    ]);
+
+    var newId = res.retValues[0];
+    var ref = 'Q-' + String(newId).padStart(4, '0');
+
+    for (var i = 0; i < selectedThemes.length; i++) {
+      var libelle = selectedThemes[i];
+      var existing = allThemes.find(function(t) {
+        return t.libelle.toLowerCase() === libelle.toLowerCase();
+      });
+      var themeId;
+      if (existing) {
+        themeId = existing.id;
+      } else {
+        var tRes = await grist.docApi.applyUserActions([
+          ['AddRecord', 'Enum_Themes', null, { libelle: libelle }]
+        ]);
+        themeId = tRes.retValues[0];
+        allThemes.push({ id: themeId, libelle: libelle });
+      }
+      await grist.docApi.applyUserActions([
+        ['AddRecord', 'Question_Theme_Link', null, { question: newId, theme: themeId }]
+      ]);
     }
 
-    /* COLONNE GAUCHE */
-    .search-left{
-      flex:0 0 260px;
-      display:flex;
-      flex-direction:column;
-      gap:8px;
-    }
-    .search-input{
-      width:100%;
-      padding:7px 10px;
-      border:1px solid var(--border);
-      border-radius:8px;
-      font-size:13px;
-      font-family:inherit;
-      outline:none;
-    }
-    .search-input:focus{border-color:var(--accent)}
+    selectedThemes = [];
+    renderThemeTags();
+    refreshThemeDatalist();
+    document.getElementById('inQ').value = '';
+    document.getElementById('modalRef').textContent = ref;
+    document.getElementById('modal').style.display = 'flex';
 
-    .filter-group{
-      display:flex;
-      flex-direction:column;
-      gap:6px;
+    await loadThemes();
+    await loadQuestions();
+
+    await notifyAdminsNewQuestion(newId, ref, uid, txt);
+
+  } catch(e) {
+    alert('❌ Erreur: ' + e.message);
+  }
+
+  document.getElementById('btnSub').disabled = false;
+}
+
+// ══════════════════════════════════════════════════════
+//  NOTIFY ADMINS
+// ══════════════════════════════════════════════════════
+async function notifyAdminsNewQuestion(qId, ref, authorId, contenu) {
+  var author = usersMap[authorId];
+  var authorName = author ? author.nom : 'Un utilisateur';
+  var now = new Date().toLocaleString('fr-FR');
+
+  var recipients = [];
+  users.forEach(function(u) {
+    if (u.role === 'admin' && u.id !== authorId && u.email) {
+      recipients.push({ email: u.email, name: u.nom });
     }
-    .filter-item{
-      display:flex;
-      flex-direction:column;
-      gap:2px;
+  });
+
+  if (!recipients.length) {
+    console.warn('Aucun admin destinataire trouvé');
+    return;
+  }
+
+  var subject = '[GT Harmonisation CBS] Nouvelle question ' + ref + ' posée';
+
+  var htmlContent =
+    '<p>Bonjour,</p>' +
+    '<p>La question <strong>' + esc(ref) + '</strong> a été posée par <strong>' + esc(authorName) + '</strong> le ' + esc(now) + '.</p>' +
+    '<p>La question est :</p>' +
+    '<blockquote style="border-left:3px solid #4361ee;padding:8px 12px;margin:12px 0;color:#1e293b;background:#f8f9fa;border-radius:4px">' +
+      esc(contenu) +
+    '</blockquote>' +
+    '<p style="margin-top:20px">Cordialement<br>' +
+      '<strong>L\'équipe GT Harmonisation</strong></p>' +
+    '<hr style="margin:20px 0;border:none;border-top:1px solid #ddd">' +
+    '<p style="font-size:11px;color:#999">Cet email est automatique, merci de ne pas y répondre.</p>';
+
+  for (var j = 0; j < recipients.length; j++) {
+    try {
+      var resp = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'api-key': BREVO_API_KEY,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          sender: { name: BREVO_SENDER_NAME, email: BREVO_SENDER_EMAIL },
+          to: [{ email: recipients[j].email, name: recipients[j].name }],
+          subject: subject,
+          htmlContent: htmlContent
+        })
+      });
+      if (!resp.ok) {
+        var err = await resp.json();
+        console.warn('Brevo error:', err.message || resp.statusText);
+      }
+    } catch(e) {
+      console.warn('Mail error:', e);
     }
-    .filter-item label{
-      font-size:12px;
-      font-weight:600;
-      color:var(--text2);
-      margin:0;
-    }
-    .filter-item select{
-      width:100%;
-      padding:5px 8px;
-      font-size:13px;
-      border:1px solid var(--border);
-      border-radius:6px;
-      background:white;
-    }
-    .btn-clear{
-      padding:5px 10px;
-      border:1px solid var(--border);
-      border-radius:6px;
-      background:white;
-      color:var(--text2);
-      font-size:12px;
-      font-weight:600;
-      cursor:pointer;
-      align-self:flex-start;
-    }
-    .btn-clear:hover{background:#fee2e2;color:#dc2626;border-color:#dc2626}
-    .search-count{
-      font-size:12px;
-      color:var(--text2);
-      font-weight:600;
-    }
+  }
+}
 
-    /* COLONNE DROITE */
-    .search-right{
-      flex:1;
-      min-width:0;
-      max-height:320px;
-      overflow-y:auto;
-      border:1px solid var(--border);
-      border-radius:8px;
-      padding:4px 8px;
-      background:#FAFCFF;
-    }
+// ══════════════════════════════════════════════════════
+//  HELPERS
+// ═════════════════════════════════════════════════���════
+function esc(t) {
+  var d = document.createElement('div');
+  d.textContent = t || '';
+  return d.innerHTML;
+}
 
-    /* ITEMS RÉSULTATS */
-    .ri{
-      padding:7px 4px;
-      border-bottom:1px solid #f0f0f0;
-      display:flex;
-      flex-direction:column;
-      gap:3px;
-      cursor:default;
-    }
-    .ri:last-child{border-bottom:none}
-    .ri:hover{background:#f0f4ff;border-radius:6px}
-    .ri-top{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
-    .ri-ref{font-size:13px;font-weight:700;color:var(--accent);flex-shrink:0}
-    .ri-contenu{font-size:13px;color:var(--text);line-height:1.4}
-    .ri-bottom{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-    .ri-date{font-size:12px;color:#999}
-    .ri-theme{
-      font-size:11px;padding:1px 5px;border-radius:5px;
-      background:#e0e7ff;color:#3730a3;font-weight:600;
-    }
-    .empty-search{
-      text-align:center;padding:20px;
-      color:var(--text2);font-size:13px;
-    }
+// ══════════════════════════════════════════════════════
+//  MARKDOWN TOOLBAR
+// ══════════════════════════════════════════════════════
+function mdWrap(prefix, suffix) {
+  var ta = document.getElementById('inQ');
+  var start = ta.selectionStart, end = ta.selectionEnd;
+  var sel = ta.value.substring(start, end);
+  var replacement = prefix + (sel || 'texte') + suffix;
+  ta.value = ta.value.substring(0, start) + replacement + ta.value.substring(end);
+  ta.focus();
+  ta.selectionStart = start + prefix.length;
+  ta.selectionEnd = start + prefix.length + (sel || 'texte').length;
+}
 
-    /* Supprime les anciennes règles de filtre sur une ligne */
-    .filter-row{display:none}
-    .search-bar{display:none}
+function mdLine(prefix) {
+  var ta = document.getElementById('inQ');
+  var start = ta.selectionStart;
+  var lineStart = ta.value.lastIndexOf('\n', start - 1) + 1;
+  ta.value = ta.value.substring(0, lineStart) + prefix + ta.value.substring(lineStart);
+  ta.focus();
+  ta.selectionStart = ta.selectionEnd = start + prefix.length;
+}
 
-    /* STATUTS */
-    .st{font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;white-space:nowrap}
-    .st-nouvelle{background:#dbeafe;color:#1e40af}
-    .st-en_qualification,.st-recherche_doc_en_cours,.st-en_attente_validation{background:#e0e7ff;color:#3730a3}
-    .st-qualifiee,.st-validee{background:#d1fae5;color:#065f46}
-    .st-reponse_proposee,.st-reponse_expert_proposee{background:#fef3c7;color:#92400e}
-    .st-en_escalade_expert,.st-insatisfaction{background:#fee2e2;color:#991b1b}
-    .st-doublon_detecte,.st-close{background:#e5e7eb;color:#374151}
+function togglePreview() {
+  var ta = document.getElementById('inQ');
+  var prev = document.getElementById('mdPreview');
+  var btn = document.getElementById('btnPreview');
+  if (prev.style.display === 'none') {
+    prev.innerHTML = renderMarkdown(ta.value);
+    prev.style.display = 'block';
+    ta.style.display = 'none';
+    btn.textContent = '✏️ Éditer';
+  } else {
+    prev.style.display = 'none';
+    ta.style.display = 'block';
+    btn.textContent = '👁 Aperçu';
+  }
+}
 
-    /* FORM ROW : 2 colonnes côte à côte */
-    .form-row{
-      display:flex;
-      gap:12px;
-      margin-bottom:8px;
-      align-items:flex-start;
-    }
-    .form-col{
-      flex:1;
-      min-width:0;
-      display:flex;
-      flex-direction:column;
-      gap:4px;
-    }
-    .form-col label{margin:0}
-
-    /* BOUTON AJOUTER THEME */
-    .btn-add-theme{
-      padding:6px 12px;
-      border:1px solid var(--accent);
-      background:white;
-      color:var(--accent);
-      border-radius:8px;
-      font-size:13px;
-      font-weight:600;
-      cursor:pointer;
-      white-space:nowrap;
-      flex-shrink:0;
-    }
-    .btn-add-theme:hover{background:var(--accent);color:white}
-
-    /* MARKDOWN EDITOR */
-    .md-editor{
-      border:1px solid var(--border);
-      border-radius:8px;
-      overflow:hidden;
-      margin-bottom:8px;
-    }
-    .md-toolbar{
-      display:flex;
-      align-items:center;
-      gap:2px;
-      padding:4px 6px;
-      background:#f1f3f5;
-      border-bottom:1px solid var(--border);
-      flex-wrap:wrap;
-    }
-    .md-btn{
-      padding:3px 7px;
-      border:none;
-      background:transparent;
-      border-radius:4px;
-      font-size:14px;
-      font-weight:700;
-      cursor:pointer;
-      color:var(--text);
-      line-height:1.4;
-    }
-    .md-btn:hover{background:#dee2e6}
-    .md-btn-preview{
-      margin-left:auto;
-      font-size:13px;
-      font-weight:600;
-      color:var(--accent);
-      border:1px solid var(--accent) !important;
-      padding:2px 8px;
-    }
-    .md-btn-preview:hover{background:#e0e7ff}
-    .md-sep{
-      width:1px;
-      height:16px;
-      background:var(--border);
-      margin:0 2px;
-      flex-shrink:0;
-    }
-    .md-editor textarea{
-      width:100%;
-      border:none;
-      outline:none;
-      padding:10px 12px;
-      font-size:13px;
-      font-family:inherit;
-      resize:vertical;
-      min-height:150px;
-      border-radius:0;
-    }
-    .md-preview{
-      padding:10px 12px;
-      font-size:13px;
-      line-height:1.6;
-      min-height:120px;
-      background:white;
-      color:var(--text);
-    }
-    .md-preview strong{font-weight:700}
-    .md-preview em{font-style:italic}
-    .md-preview code{background:#f1f3f5;padding:1px 4px;border-radius:3px;font-size:13px;font-family:monospace}
-    .md-preview pre{background:#f1f3f5;padding:8px 10px;border-radius:6px;font-size:13px;overflow-x:auto}
-    .md-preview h2{font-size:15px;margin:6px 0 4px}
-    .md-preview ul{padding-left:18px}
-    .md-preview ol{padding-left:18px}
-    .md-preview li{margin:2px 0}
-    .md-preview blockquote{border-left:3px solid var(--accent);padding-left:8px;color:var(--text2);margin:4px 0}
-    .md-preview a{color:var(--accent)}
-
-    /* MODAL */
-    @keyframes fadeIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
-  </style>
-</head>
-<body>
-
-  <!-- BLOC 1 : RECHERCHE -->
-  <div class="card">
-    <h2>🔍 Questions existantes</h2>
-    <p class="card-subtitle">Vérifiez que votre question n'a pas déjà été posée avant de la soumettre.</p>
-
-    <div class="search-layout">
-
-      <!-- COLONNE GAUCHE : filtres -->
-      <div class="search-left">
-        <input type="text" id="searchInput" placeholder="🔍 Rechercher…"
-          oninput="renderSearch()" class="search-input">
-
-        <div class="filter-group">
-          <div class="filter-item">
-            <label>Thème</label>
-            <select id="fTheme" onchange="renderSearch()">
-              <option value="">— Tous —</option>
-            </select>
-          </div>
-          <div class="filter-item">
-            <label>Statut</label>
-            <select id="fStatut" onchange="renderSearch()">
-              <option value="">— Tous —</option>
-              <option value="nouvelle">🆕 Nouvelle</option>
-              <option value="en_cours">💬 En cours</option>
-              <option value="validee">✅ Validée</option>
-              <option value="close">🔒 Clôturée</option>
-            </select>
-          </div>
-          <div class="filter-item">
-            <label>Auteur</label>
-            <select id="fAuteur" onchange="renderSearch()">
-              <option value="">— Tous —</option>
-            </select>
-          </div>
-          <button class="btn-clear" onclick="clearFilters()">✕ Effacer</button>
-        </div>
-
-        <div class="search-count" id="searchCount"></div>
-      </div>
-
-      <!-- COLONNE DROITE : résultats -->
-      <div class="search-right">
-        <div id="searchResults"><div class="empty-search">⏳ Chargement…</div></div>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- BLOC 2 : FORMULAIRE -->
-  <div class="card">
-    <h2>❓ Poser une Question</h2>
-
-    <!-- Ligne : Qui + Thèmes côte à côte -->
-    <div class="form-row">
-      <div class="form-col">
-        <label>Qui êtes-vous ?</label>
-        <select id="selUser"><option value="">— Votre nom —</option></select>
-      </div>
-      <div class="form-col">
-        <label>Thèmes</label>
-        <div class="theme-tags" id="themeTags"></div>
-        <div style="display:flex;gap:6px">
-          <input type="text" id="themeInput" list="themeDatalist"
-            placeholder="Tapez ou choisissez un thème…">
-          <datalist id="themeDatalist"></datalist>
-          <button type="button" onclick="addTheme()" class="btn-add-theme">+ Ajouter</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Zone de saisie markdown -->
-    <label>Votre question</label>
-    <div class="md-editor">
-      <div class="md-toolbar">
-        <button type="button" class="md-btn" onclick="mdWrap('**','**')" title="Gras">𝐁</button>
-        <button type="button" class="md-btn" onclick="mdWrap('*','*')" title="Italique">𝐼</button>
-        <button type="button" class="md-btn" onclick="mdWrap('`','`')" title="Code">⌥</button>
-        <button type="button" class="md-btn" onclick="mdWrap('```\n','\n```')" title="Bloc code">{ }</button>
-        <span class="md-sep"></span>
-        <button type="button" class="md-btn" onclick="mdLine('## ')" title="Titre">H</button>
-        <button type="button" class="md-btn" onclick="mdLine('- ')" title="Liste">≡</button>
-        <button type="button" class="md-btn" onclick="mdLine('1. ')" title="Liste numérotée">1.</button>
-        <span class="md-sep"></span>
-        <button type="button" class="md-btn" onclick="mdWrap('[','](url)')" title="Lien">🔗</button>
-        <button type="button" class="md-btn" onclick="mdLine('> ')" title="Citation">❝</button>
-        <span class="md-sep"></span>
-        <button type="button" class="md-btn md-btn-preview" onclick="togglePreview()" id="btnPreview" title="Aperçu">👁 Aperçu</button>
-      </div>
-      <textarea id="inQ" placeholder="Soyez clair et concis…" rows="5"></textarea>
-      <div id="mdPreview" class="md-preview" style="display:none"></div>
-    </div>
-
-    <button class="btn btn-primary" id="btnSub" onclick="submitQ()">📤 Soumettre</button>
-  </div>
-
-  <!-- MODAL CONFIRMATION -->
-  <div id="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);
-    z-index:999;align-items:center;justify-content:center">
-    <div style="background:white;border-radius:14px;padding:30px 36px;max-width:420px;
-      text-align:center;box-shadow:0 8px 30px rgba(0,0,0,.2);animation:fadeIn .3s">
-      <div style="font-size:48px;margin-bottom:12px">🎉</div>
-      <div style="font-size:18px;font-weight:700;margin-bottom:8px">Merci pour votre question !</div>
-      <div style="font-size:15px;color:#555;margin-bottom:16px">
-        Vous la retrouverez sous l'identifiant<br>
-        <span id="modalRef" style="font-size:20px;font-weight:800;color:#4361ee"></span>
-      </div>
-      <button onclick="document.getElementById('modal').style.display='none'"
-        style="padding:10px 28px;border:none;border-radius:8px;background:#4361ee;
-        color:white;font-size:14px;font-weight:600;cursor:pointer">OK</button>
-    </div>
-  </div>
-
-</body>
-</html>
+function renderMarkdown(txt) {
+  if (!txt) return '<em style="color:#999">Rien à afficher…</em>';
+  var h = txt
+    .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+    .replace(/\n{2,}/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+  return '<p>' + h + '</p>';
+}
