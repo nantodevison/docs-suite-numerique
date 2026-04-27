@@ -14,9 +14,33 @@ var allQuestions = [];
 var allThemes = [];
 var questionThemeLinks = [];
 var selectedThemes = [];
+var currentUserId = null;
 
 grist.ready({ requiredAccess: 'full' });
 init();
+setupImagePaste();
+
+// ══════════════════════════════════════════════════════
+//  DÉTECTION AUTOMATIQUE DE L'UTILISATEUR
+// ══════════════════════════════════════════════════════
+async function getCurrentUserEmail() {
+  try {
+    var res = await grist.docApi.applyUserActions([
+      ['AddRecord', 'Widget_Session', null, {}]
+    ]);
+    var newId = res.retValues[0];
+    var t = await grist.docApi.fetchTable('Widget_Session');
+    var idx = t.id.indexOf(newId);
+    var email = idx >= 0 && t.email ? t.email[idx] : null;
+    await grist.docApi.applyUserActions([
+      ['RemoveRecord', 'Widget_Session', newId]
+    ]);
+    return email ? email.toLowerCase() : null;
+  } catch(e) {
+    console.warn('getCurrentUserEmail:', e);
+    return null;
+  }
+}
 
 // ══════════════════════════════════════════════════════
 //  INIT
@@ -27,14 +51,28 @@ async function init() {
     var sel = document.getElementById('selUser');
     sel.innerHTML = '<option value="">— Votre nom —</option>';
     for (var i = 0; i < u.id.length; i++) {
-      users.push({ id: u.id[i], nom: u.nom[i], role: u.role[i], email: u.email ? u.email[i] : null });
-      usersMap[u.id[i]] = { nom: u.nom[i], role: u.role[i], email: u.email ? u.email[i] : null };
-      sel.innerHTML += '<option value="'+u.id[i]+'">'+esc(u.nom[i])+' ('+u.role[i]+')</option>';
+      var displayName = (u.display && u.display[i]) ? u.display[i] : u.nom[i];
+      users.push({ id: u.id[i], nom: u.nom[i], role: u.role[i], email: u.email ? u.email[i] : null, display: displayName });
+      usersMap[u.id[i]] = { nom: u.nom[i], role: u.role[i], email: u.email ? u.email[i] : null, display: displayName };
+      sel.innerHTML += '<option value="'+u.id[i]+'">'+esc(displayName)+'</option>';
     }
     var fAuteur = document.getElementById('fAuteur');
     users.forEach(function(u) {
-      fAuteur.innerHTML += '<option value="'+u.id+'">'+esc(u.nom)+'</option>';
+      fAuteur.innerHTML += '<option value="'+u.id+'">'+esc(u.display||u.nom)+'</option>';
     });
+
+    // Détection automatique de l'utilisateur connecté
+    var gristEmail = await getCurrentUserEmail();
+    if (gristEmail) {
+      var matched = users.find(function(u){ return u.email && u.email.toLowerCase() === gristEmail; });
+      if (matched) {
+        currentUserId = matched.id;
+        sel.value = String(matched.id);
+        console.log('🎯 Utilisateur détecté :', matched.display || matched.nom);
+      } else {
+        console.warn('❌ Aucun utilisateur correspondant à :', gristEmail);
+      }
+    }
   } catch(e) { console.warn('Users:', e); }
 
   await loadThemes();
@@ -157,7 +195,7 @@ function renderSearch() {
   resEl.innerHTML = filtered.map(function(q) {
     var st = q.statut || 'nouvelle';
     var dt = q.date ? new Date(q.date*1000).toLocaleDateString('fr-FR') : '';
-    var auteurNom = usersMap[q.auteur] ? esc(usersMap[q.auteur].nom) : '';
+    var auteurNom = usersMap[q.auteur] ? esc(usersMap[q.auteur].display || usersMap[q.auteur].nom) : '';
     var themes = getThemesForQuestion(q.id);
     var themesHtml = themes.map(function(t) {
       return '<span class="ri-theme">'+esc(t.libelle)+'</span>';
@@ -395,6 +433,7 @@ function renderMarkdown(txt) {
   var h = txt
     .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:100%;border-radius:6px;margin:6px 0;display:block;box-shadow:0 2px 8px rgba(0,0,0,.12)">')
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^# (.+)$/gm, '<h1>$1</h1>')
@@ -408,4 +447,44 @@ function renderMarkdown(txt) {
     .replace(/\n{2,}/g, '</p><p>')
     .replace(/\n/g, '<br>');
   return '<p>' + h + '</p>';
+}
+
+// ══════════════════════════════════════════════════════
+//  IMAGE PASTE
+// ══════════════════════════════════════════════════════
+function setupImagePaste() {
+  document.addEventListener('paste', function(e) {
+    var active = document.activeElement;
+    if (!active || active.tagName !== 'TEXTAREA') return;
+    if (active.id !== 'inQ') return;
+
+    var items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        e.preventDefault();
+        var blob = items[i].getAsFile();
+        if (!blob) return;
+
+        var reader = new FileReader();
+        reader.onload = (function(ta) {
+          return function(ev) {
+            var dataUrl = ev.target.result;
+            var imgMd = '\n![image]('+dataUrl+')\n';
+            var pos = ta.selectionStart;
+            ta.value = ta.value.substring(0, pos) + imgMd + ta.value.substring(pos);
+            ta.selectionStart = ta.selectionEnd = pos + imgMd.length;
+            // Mettre à jour l'aperçu si actif
+            var prev = document.getElementById('mdPreview');
+            if (prev && prev.style.display !== 'none') {
+              prev.innerHTML = renderMarkdown(ta.value);
+            }
+          };
+        })(active);
+        reader.readAsDataURL(blob);
+        return;
+      }
+    }
+  });
 }

@@ -29,6 +29,7 @@ var COV_LABELS = {
 // ══════════════════════════════════════════════════════
 grist.ready({ requiredAccess: 'full' });
 loadAll();
+setupImagePaste();
 
 async function loadAll() {
   await loadRef();
@@ -74,7 +75,8 @@ async function loadRef() {
     for (var i = 0; i < u.id.length; i++) {
       usersMap[u.id[i]] = {
         id: u.id[i], nom: u.nom[i], role: u.role[i],
-        email: u.email ? u.email[i] : null
+        email: u.email ? u.email[i] : null,
+        display: u.display ? u.display[i] : u.nom[i]
       };
     }
   } catch(e) { console.warn('Users:', e); }
@@ -258,6 +260,7 @@ async function loadQuestions() {
         est_doublon: qt.est_doublon[i], conversation: qt.conversation[i],
         validee_par_utilisateur: qt.validee_par_utilisateur[i],
         reponse_validee: qt.reponse_validee ? qt.reponse_validee[i] : null,
+        doublon_de: qt.doublon_de ? qt.doublon_de[i] : null,
       });
     }
     allQuestions.sort(function(a,b){ return (b.date_creation||0)-(a.date_creation||0); });
@@ -282,7 +285,7 @@ function populateAuthorFilter() {
   options += '<option disabled>──────────</option>';
   authorIds.forEach(function(id){
     var user = usersMap[id];
-    if (user) options += '<option value="'+id+'">'+esc(user.nom)+'</option>';
+    if (user) options += '<option value="'+id+'">'+esc(user.display||user.nom)+'</option>';
   });
   select.innerHTML = options;
 }
@@ -375,11 +378,38 @@ function renderQList() {
       return '<option value="'+k+'"'+(cov===k?' selected':'')+'>'+COV_LABELS[k]+'</option>';
     }).join('');
 
-    // Options sollicitation (tous les users sauf l'auteur)
+    // Options sollicitation
     var sollicOptions = '<option value="">— Choisir un utilisateur —</option>' +
       Object.values(usersMap).map(function(u){
-        return '<option value="'+u.id+'">'+esc(u.nom)+' ('+u.role+')</option>';
+        return '<option value="'+u.id+'">'+esc(u.display||u.nom)+'</option>';
       }).join('');
+
+    // Doublon UI
+    var doublonHtml;
+    if (q.est_doublon && q.doublon_de) {
+      doublonHtml = '<div style="margin-top:6px">' +
+        '<span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:6px;font-size:11px;font-weight:600">🔁 Doublon de Q-'+String(q.doublon_de).padStart(4,'0')+'</span>' +
+        ' <button onclick="event.stopPropagation();unmarkDuplicate('+q.id+')" ' +
+          'style="font-size:10px;padding:1px 5px;border:1px solid var(--red);background:white;color:var(--red);border-radius:4px;cursor:pointer">✖ Annuler</button>' +
+      '</div>';
+    } else {
+      var dupOptions = '<option value="">— Question source —</option>' +
+        allQuestions.filter(function(x){ return x.id !== q.id; }).map(function(x){
+          return '<option value="'+x.id+'">Q-'+String(x.id).padStart(4,'0')+' – '+esc((x.contenu||'').substring(0,50))+'</option>';
+        }).join('');
+      doublonHtml = '<div style="margin-top:6px">' +
+        '<button id="btnDuplon_'+q.id+'" onclick="event.stopPropagation();showDuplicateForm('+q.id+')" ' +
+          'style="font-size:11px;padding:2px 8px;border:1px solid #92400e;background:white;color:#92400e;border-radius:4px;cursor:pointer;font-weight:600">' +
+          '🔁 Marquer doublon</button>' +
+        '<div id="dupForm_'+q.id+'" style="display:none;margin-top:4px">' +
+          '<select id="dupSel_'+q.id+'" style="width:100%;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px">'+dupOptions+'</select>' +
+          '<div style="display:flex;gap:4px;margin-top:3px">' +
+            '<button onclick="event.stopPropagation();saveDuplicate('+q.id+')" style="font-size:11px;padding:2px 8px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600">✔ Valider</button>' +
+            '<button onclick="event.stopPropagation();hideDuplicateForm('+q.id+')" style="font-size:11px;padding:2px 8px;background:var(--grey);color:white;border:none;border-radius:4px;cursor:pointer">✖</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }
 
     return '<div class="qcard'+(isOpen?' open selected':'')+'" data-id="'+q.id+'">' +
 
@@ -406,10 +436,10 @@ function renderQList() {
         '<div class="info-col">' +
           '<div class="info-col-title">ℹ️ Infos</div>' +
           '<dl class="info-grid">' +
-            '<dt>Auteur</dt><dd>'+esc(au?au.nom:'?')+'</dd>' +
+            '<dt>Auteur</dt><dd>'+esc(au?(au.display||au.nom):'?')+'</dd>' +
             '<dt>Date</dt><dd>'+(q.date_creation?new Date(q.date_creation*1000).toLocaleDateString('fr-FR'):'—')+'</dd>' +
-            '<dt>Doublon</dt><dd>'+(q.est_doublon?'OUI ⚠️':'Non')+'</dd>' +
           '</dl>' +
+          doublonHtml +
         '</div>' +
 
         // COL 2 : Thèmes
@@ -512,7 +542,7 @@ function renderQList() {
 function userOptions() {
   return Object.values(usersMap).map(function(u){
     var sel = u.id===currentUserId?' selected':'';
-    return '<option value="'+u.id+'"'+sel+'>'+esc(u.nom)+' ('+u.role+')</option>';
+    return '<option value="'+u.id+'"'+sel+'>'+esc(u.display||u.nom)+'</option>';
   }).join('');
 }
 function chapOptions() {
@@ -722,7 +752,7 @@ function renderMsgs(qId, msgs, question) {
 
   el.innerHTML = msgs.map(function(m) {
     var u = usersMap[m.auteur];
-    var nm = u?u.nom:'User#'+m.auteur;
+    var nm = u?(u.display||u.nom):'User#'+m.auteur;
     var role = u?u.role:'user';
     var ic = role==='admin'?'🛡️':'👤';
     var side = m.auteur===currentUserId?'right':'left';
@@ -1136,6 +1166,7 @@ function renderMarkdown(txt) {
   var h = txt
     .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="msg-img">')
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^# (.+)$/gm, '<h1>$1</h1>')
@@ -1188,4 +1219,92 @@ function toggleTxt(qId) {
   if (!txt) return;
   txt.classList.toggle('expanded');
   btn.classList.toggle('expanded');
+}
+
+// ══════════════════════════════════════════════════════
+//  DUPLICATE MANAGEMENT
+// ══════════════════════════════════════════════════════
+function showDuplicateForm(qId) {
+  var form = document.getElementById('dupForm_'+qId);
+  var btn  = document.getElementById('btnDuplon_'+qId);
+  if (form) form.style.display = 'block';
+  if (btn)  btn.style.display  = 'none';
+}
+
+function hideDuplicateForm(qId) {
+  var form = document.getElementById('dupForm_'+qId);
+  var btn  = document.getElementById('btnDuplon_'+qId);
+  if (form) form.style.display = 'none';
+  if (btn)  btn.style.display  = '';
+}
+
+async function saveDuplicate(qId) {
+  var sel = document.getElementById('dupSel_'+qId);
+  if (!sel) return;
+  var sourceId = +sel.value;
+  if (!sourceId) { alert('Sélectionnez la question source'); return; }
+
+  await grist.docApi.applyUserActions([['UpdateRecord','Questions',qId,{
+    est_doublon: true,
+    doublon_de: sourceId
+  }]]);
+  toast('🔁 Question marquée comme doublon de Q-'+String(sourceId).padStart(4,'0'));
+  var savedOpen = openCardId;
+  await loadQuestions();
+  openCardId = savedOpen;
+  renderQList();
+  if (openCardId) loadMsgs(openCardId);
+}
+
+async function unmarkDuplicate(qId) {
+  if (!confirm('Retirer le statut doublon de cette question ?')) return;
+  await grist.docApi.applyUserActions([['UpdateRecord','Questions',qId,{
+    est_doublon: false,
+    doublon_de: 0
+  }]]);
+  toast('✅ Statut doublon retiré');
+  var savedOpen = openCardId;
+  await loadQuestions();
+  openCardId = savedOpen;
+  renderQList();
+  if (openCardId) loadMsgs(openCardId);
+}
+
+// ══════════════════════════════════════════════════════
+//  IMAGE PASTE
+// ══════════════════════════════════════════════════════
+function setupImagePaste() {
+  document.addEventListener('paste', function(e) {
+    var active = document.activeElement;
+    if (!active || active.tagName !== 'TEXTAREA') return;
+    var id = active.id;
+    // Cibler les zones de saisie des réponses et d'édition
+    if (!id.startsWith('txtMsg_') && !id.startsWith('msgeditTA_')) return;
+
+    var items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        e.preventDefault();
+        var blob = items[i].getAsFile();
+        if (!blob) return;
+
+        var reader = new FileReader();
+        reader.onload = (function(ta) {
+          return function(ev) {
+            var dataUrl = ev.target.result;
+            var imgMd = '\n![image]('+dataUrl+')\n';
+            var pos = ta.selectionStart;
+            ta.value = ta.value.substring(0, pos) + imgMd + ta.value.substring(pos);
+            ta.selectionStart = ta.selectionEnd = pos + imgMd.length;
+            ta.dispatchEvent(new Event('input'));
+            toast('🖼️ Image insérée');
+          };
+        })(active);
+        reader.readAsDataURL(blob);
+        return;
+      }
+    }
+  });
 }
