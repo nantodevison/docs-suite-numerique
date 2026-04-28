@@ -390,21 +390,43 @@ function renderQList() {
         return '<option value="'+x.id+'">Q-'+String(x.id).padStart(4,'0')+' – '+esc((x.contenu||'').substring(0,50))+'</option>';
       }).join('');
 
-    // Badge doublon (info-panel COL 1 : lecture seule)
-    var doublonBadge = (q.est_doublon && q.doublon_de)
-      ? '<div style="margin-top:6px"><span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:6px;font-size:11px;font-weight:600">🔁 Doublon de Q-'+String(q.doublon_de).padStart(4,'0')+'</span></div>'
-      : '';
 
     return '<div class="qcard'+(isOpen?' open selected':'')+'" data-id="'+q.id+'">' +
 
       // HEAD
       '<div class="qcard-head" onclick="toggleCard('+q.id+')">' +
+        (isOpen ? '<button class="btn-card-close" onclick="event.stopPropagation();closeCard()" title="Fermer">✕</button>' : '') +
         '<div style="display:flex;flex-direction:column;align-items:center;gap:3px;flex-shrink:0;min-width:80px">' +
           '<span class="qcard-ref">Q-'+String(q.id).padStart(4,'0')+'</span>' +
           renderVoteBox('question', q.id) +
           '<span class="badge s-'+st+'">'+esc(st)+'</span>' +
         '</div>' +
-        '<span class="qcard-txt" id="qtxt_'+q.id+'">'+renderMarkdownInline(q.contenu||'')+'</span>' +
+        '<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">' +
+          '<span class="qcard-txt" id="qtxt_'+q.id+'">'+renderMarkdownInline(q.contenu||'')+'</span>' +
+          '<div class="qcard-meta" onclick="event.stopPropagation()">' +
+            '<span>👤 '+esc(au?(au.display||au.nom):'?')+'</span>' +
+            '<span class="meta-sep">·</span>' +
+            '<span>'+(q.date_creation?new Date(q.date_creation*1000).toLocaleDateString('fr-FR'):'—')+'</span>' +
+            '<span class="meta-sep">·</span>' +
+            '<span style="font-size:11px;color:var(--text2);white-space:nowrap">Couvert par Guide :</span>' +
+            '<select class="meta-cov-select" id="selCov_'+q.id+'" onchange="saveCov('+q.id+')">' +
+              Object.keys(COV_LABELS).map(function(k){
+                return '<option value="'+k+'"'+(cov===k?' selected':'')+'>'+COV_LABELS[k]+'</option>';
+              }).join('') +
+            '</select>' +
+            '<span class="meta-sep">·</span>' +
+            '<div class="meta-themes-wrap">' +
+              themes.map(function(t){
+                return '<span class="theme-tag">'+esc(t)+
+                  '<span class="remove" onclick="removeQTheme('+q.id+',\''+esc(t).replace(/'/g,"\\'")+'\')">×</span></span>';
+              }).join('') +
+              themeDatalistHtml +
+              '<input type="text" id="qThemeInput_'+q.id+'" list="qThemeDL_'+q.id+'" placeholder="+ thème" class="meta-theme-input" ' +
+                'onkeydown="if(event.key===\'Enter\'){event.preventDefault();addQTheme('+q.id+')}">' +
+            '</div>' +
+            (q.est_doublon && q.doublon_de ? '<span class="meta-sep">·</span><span style="background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:5px;font-size:10px;font-weight:600">🔁 Q-'+String(q.doublon_de).padStart(4,'0')+'</span>' : '') +
+          '</div>' +
+        '</div>' +
         '<button class="btn-expand-txt" id="btnexp_'+q.id+'" ' +
           'onclick="event.stopPropagation();toggleTxt('+q.id+')" ' +
           'title="Voir plus">▼</button>' +
@@ -413,61 +435,16 @@ function renderQList() {
       // BODY
       '<div class="qcard-body">' +
 
-        // INFO PANEL : 4 colonnes
-      '<div class="info-panel">' +
-
-        // COL 1 : Auteur + Date + Doublon
-        '<div class="info-col">' +
-          '<div class="info-col-title">ℹ️ Infos</div>' +
-          '<dl class="info-grid">' +
-            '<dt>Auteur</dt><dd>'+esc(au?(au.display||au.nom):'?')+'</dd>' +
-            '<dt>Date</dt><dd>'+(q.date_creation?new Date(q.date_creation*1000).toLocaleDateString('fr-FR'):'—')+'</dd>' +
-          '</dl>' +
-          doublonBadge +
+        // EDIT STRIP compact (sollicitation uniquement)
+      '<div class="edit-strip">' +
+        '<div class="edit-strip-row">' +
+          '<label>✉️ Solliciter</label>' +
+          '<select class="sollic-select" id="selSollic_'+q.id+'" style="flex:0 0 170px;font-size:12px">'+sollicOptions+'</select>' +
+          '<textarea class="sollic-textarea" id="txtSollic_'+q.id+'" maxlength="500" ' +
+            'placeholder="Message optionnel (500 car. max)…" ' +
+            'style="flex:1;height:28px;min-height:28px;resize:none;padding:3px 8px;font-size:12px"></textarea>' +
+          '<button class="btn-sollic" id="btnSollic_'+q.id+'" onclick="sendSollicitation('+q.id+')" style="height:28px;font-size:12px">✉️ Envoyer</button>' +
         '</div>' +
-
-        // COL 2 : Thèmes
-        '<div class="info-col">' +
-          '<div class="info-col-title">🏷️ Thèmes</div>' +
-          '<div style="display:flex;gap:4px;margin-top:6px">' +
-            '<input type="text" id="qThemeInput_'+q.id+'" list="qThemeDL_'+q.id+'" placeholder="Ajouter…" ' +
-              'style="flex:1;padding:3px 6px;border:1px solid var(--border);border-radius:6px;font-size:10px" ' +
-              'onkeydown="if(event.key===\'Enter\'){event.preventDefault();addQTheme('+q.id+')}">' +
-            themeDatalistHtml +
-            '<button onclick="addQTheme('+q.id+')" ' +
-              'style="padding:3px 8px;border:1px solid var(--accent);background:white;color:var(--accent);' +
-              'border-radius:6px;font-size:10px;cursor:pointer;font-weight:600;flex-shrink:0">+</button>' +
-          '</div>' +
-          '<div class="theme-tags" id="qThemeTags_'+q.id+'">' +
-            themes.map(function(t){
-              return '<span class="theme-tag">'+esc(t)+
-                '<span class="remove" onclick="event.stopPropagation();removeQTheme('+q.id+',\''+esc(t).replace(/'/g,"\\'")+'\')">×</span></span>';
-            }).join('') +
-          '</div>' +
-        '</div>' +
-
-        // COL 3 : Couverture doc
-        '<div class="info-col">' +
-          '<div class="info-col-title">📄 Couverture doc</div>' +
-          '<select class="cov-select" id="selCov_'+q.id+'" onchange="saveCov('+q.id+')">' +
-            Object.keys(COV_LABELS).map(function(k){
-              return '<option value="'+k+'"'+(cov===k?' selected':'')+'>'+COV_LABELS[k]+'</option>';
-            }).join('') +
-          '</select>' +
-        '</div>' +
-
-        // COL 4 : Sollicitation
-        '<div class="info-col">' +
-          '<div class="info-col-title">✉️ Solliciter un utilisateur</div>' +
-          '<div style="display:flex;gap:6px;align-items:center;flex-wrap:nowrap">' +
-            '<select class="sollic-select" id="selSollic_'+q.id+'" style="flex:0 0 180px">'+sollicOptions+'</select>' +
-            '<textarea class="sollic-textarea" id="txtSollic_'+q.id+'" maxlength="500" ' +
-              'placeholder="Message optionnel (500 car. max)…" ' +
-              'style="flex:1;height:32px;min-height:32px;resize:none;padding:5px 8px"></textarea>' +
-            '<button class="btn-sollic" id="btnSollic_'+q.id+'" onclick="sendSollicitation('+q.id+')" style="height:32px;align-self:auto">✉️ Envoyer</button>' +
-          '</div>' +
-        '</div>' +
-
       '</div>' +
 
         // MESSAGES
@@ -479,36 +456,36 @@ function renderQList() {
         isValidated ?
           '<div class="validated-banner">✅ Réponse validée par l\'auteur</div>' :
         '<div class="inp-zone" id="inp_'+q.id+'">' +
-          '<div class="inp-selectors">' +
-            '<div class="inp-selector" style="flex:0 0 auto"><label>Qui</label>' +
-              '<select id="selUser_'+q.id+'" style="max-width:325px">'+userOptions()+'</select></div>' +
-            '<div class="inp-selector" style="flex:0 0 auto"><label>Source</label>' +
-              '<select id="selSrc_'+q.id+'" style="width:250px">' +
+          '<div class="inp-main-row">' +
+          '<div class="inp-msg">' +
+            '<textarea id="txtMsg_'+q.id+'" rows="4" placeholder="Votre message / réponse…" ' +
+              'style="border-radius:12px" ' +
+              'onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();sendResp('+q.id+')}"></textarea>' +
+          '</div>' +
+          '<div class="md-toolbar-grid">' +
+            '<button type="button" class="md-btn" onclick="mdWrapTA(\'txtMsg_'+q.id+'\',\'**\',\'**\')" title="Gras"><strong>B</strong></button>' +
+            '<button type="button" class="md-btn" onclick="mdWrapTA(\'txtMsg_'+q.id+'\',\'*\',\'*\')" title="Italique"><em>I</em></button>' +
+            '<button type="button" class="md-btn" onclick="mdWrapTA(\'txtMsg_'+q.id+'\',\'`\',\'`\')" title="Code">⌥</button>' +
+            '<button type="button" class="md-btn" onclick="mdWrapTA(\'txtMsg_'+q.id+'\',\'```\\n\',\'\\n```\')" title="Bloc code">{ }</button>' +
+            '<button type="button" class="md-btn" onclick="mdLineTA(\'txtMsg_'+q.id+'\',\'## \')" title="Titre">H</button>' +
+            '<button type="button" class="md-btn" onclick="mdLineTA(\'txtMsg_'+q.id+'\',\'- \')" title="Liste">≡</button>' +
+            '<button type="button" class="md-btn" onclick="mdLineTA(\'txtMsg_'+q.id+'\',\'1. \')" title="Liste numérotée">1.</button>' +
+            '<button type="button" class="md-btn" onclick="mdWrapTA(\'txtMsg_'+q.id+'\',\'[\',\'](url)\')" title="Lien">🔗</button>' +
+            '<button type="button" class="md-btn" onclick="mdLineTA(\'txtMsg_'+q.id+'\',\'> \')" title="Citation">❝</button>' +
+          '</div>' +
+          '<div class="inp-selectors-stack">' +
+            '<div class="inp-selector"><label>Qui</label>' +
+              '<select id="selUser_'+q.id+'">'+userOptions()+'</select></div>' +
+            '<div class="inp-selector"><label>Source</label>' +
+              '<select id="selSrc_'+q.id+'">' +
                 '<option value="doc_reference">📖 Doc référence</option>' +
                 '<option value="admin">👑 Admin</option>' +
                 '<option value="autre_question">🔄 Autre question</option>' +
                 '<option value="autre">💡 Autre</option>' +
               '</select></div>' +
-            '<div class="inp-selector" style="flex:1;min-width:80px"><label>Chapitre</label>' +
-              '<select id="selCh_'+q.id+'" style="width:100%"><option value="">— Aucun —</option>'+chapOptions()+'</select></div>' +
+            '<div class="inp-selector"><label>Chapitre</label>' +
+              '<select id="selCh_'+q.id+'"><option value="">— Aucun —</option>'+chapOptions()+'</select></div>' +
           '</div>' +
-          '<div class="inp-msg">' +
-            '<div class="md-toolbar" style="background:#f1f3f5;border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;padding:4px 6px;display:flex;gap:2px;flex-wrap:wrap">' +
-              '<button type="button" class="md-btn" onclick="mdWrapTA(\'txtMsg_'+q.id+'\',\'**\',\'**\')" title="Gras"><strong>B</strong></button>' +
-              '<button type="button" class="md-btn" onclick="mdWrapTA(\'txtMsg_'+q.id+'\',\'*\',\'*\')" title="Italique"><em>I</em></button>' +
-              '<button type="button" class="md-btn" onclick="mdWrapTA(\'txtMsg_'+q.id+'\',\'`\',\'`\')" title="Code">⌥</button>' +
-              '<button type="button" class="md-btn" onclick="mdWrapTA(\'txtMsg_'+q.id+'\',\'```\\n\',\'\\n```\')" title="Bloc code">{ }</button>' +
-              '<span style="width:1px;height:16px;background:var(--border);margin:0 2px;align-self:center"></span>' +
-              '<button type="button" class="md-btn" onclick="mdLineTA(\'txtMsg_'+q.id+'\',\'## \')" title="Titre">H</button>' +
-              '<button type="button" class="md-btn" onclick="mdLineTA(\'txtMsg_'+q.id+'\',\'- \')" title="Liste">≡</button>' +
-              '<button type="button" class="md-btn" onclick="mdLineTA(\'txtMsg_'+q.id+'\',\'1. \')" title="Liste numérotée">1.</button>' +
-              '<span style="width:1px;height:16px;background:var(--border);margin:0 2px;align-self:center"></span>' +
-              '<button type="button" class="md-btn" onclick="mdWrapTA(\'txtMsg_'+q.id+'\',\'[\',\'](url)\')" title="Lien">🔗</button>' +
-              '<button type="button" class="md-btn" onclick="mdLineTA(\'txtMsg_'+q.id+'\',\'> \')" title="Citation">❝</button>' +
-            '</div>' +
-            '<textarea id="txtMsg_'+q.id+'" rows="4" placeholder="Votre message / réponse…" ' +
-              'style="border-radius:0 0 12px 12px;border-top:none" ' +
-              'onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();sendResp('+q.id+')}"></textarea>' +
           '</div>' +
           '<div class="btn-row">' +
             '<button class="btn btn-send" onclick="sendResp('+q.id+')">💬 Envoyer</button>' +
@@ -531,6 +508,25 @@ function renderQList() {
       '</div>' +
     '</div>';
   }).join('');
+  setTimeout(applyFullscreen, 0);
+}
+
+function applyFullscreen() {
+  var backdrop = document.getElementById('card-backdrop');
+  var card = document.querySelector('.qcard.open');
+  if (backdrop && card && openCardId) {
+    backdrop.style.display = 'block';
+    card.classList.add('fullscreen');
+    document.body.style.overflow = 'hidden';
+  } else if (backdrop) {
+    backdrop.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+}
+
+function closeCard() {
+  openCardId = null;
+  renderQList();
 }
 
 function userOptions() {
@@ -697,6 +693,10 @@ function toggleCard(id) {
   renderQList();
   loadMsgs(id);
 }
+
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape' && openCardId) closeCard();
+});
 
 // ══════════════════════════════════════════════════════
 //  LOAD MESSAGES

@@ -29,7 +29,7 @@
     .qcard-head{padding:8px 12px;cursor:pointer;display:flex;align-items:flex-start;gap:6px;
                 transition:background .15s;flex-wrap:nowrap;min-height:36px;flex-shrink:0}
     .qcard-ref{font-weight:700;font-size:13px;white-space:nowrap;color:var(--accent);flex-shrink:0}
-    .qcard-txt{font-size:14px;color:var(--text);flex:1;min-width:0;
+    .qcard-txt{font-size:14px;color:var(--text);width:100%;min-width:0;
         overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;
         white-space:normal;-webkit-line-clamp:2;max-height:3em;
         transition:max-height .3s ease}
@@ -69,6 +69,28 @@
     .cov-non_couverte .cov-dot{background:var(--red)}
     .cov-hors_perimetre .cov-dot{background:var(--grey)}
     .cov-a_evaluer .cov-dot{background:var(--blue)}
+
+    /* EDIT STRIP compact (sollicitation) */
+    .edit-strip{display:flex;flex-direction:column;gap:4px;
+                padding:6px 12px;background:#fafbfc;
+                border-bottom:1px solid var(--border);flex-shrink:0}
+    .edit-strip-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .edit-strip-row label{font-size:11px;font-weight:700;color:var(--text2);
+                          text-transform:uppercase;letter-spacing:.3px;
+                          white-space:nowrap;flex-shrink:0}
+
+    /* META INLINE (dans qcard-head) */
+    .qcard-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+                font-size:11px;color:var(--text2)}
+    .qcard-meta .meta-sep{color:var(--border);user-select:none}
+    .meta-cov-select{padding:1px 4px;border:1px solid var(--border);border-radius:5px;
+                     font-size:11px;background:white;cursor:pointer;color:var(--text)}
+    .meta-cov-select:focus{outline:none;border-color:var(--accent)}
+    .meta-themes-wrap{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap}
+    .meta-theme-input{width:70px;padding:1px 5px;border:1px solid var(--border);
+                      border-radius:5px;font-size:11px;background:white;
+                      transition:width .2s;color:var(--text)}
+    .meta-theme-input:focus{outline:none;border-color:var(--accent);width:110px}
 
     /* INFO PANEL : 4 colonnes */
     .info-panel{
@@ -185,12 +207,16 @@
 
     /* INPUT ZONE */
     .inp-zone{flex-shrink:0;padding:10px 14px;border-top:1px solid var(--border);background:#fafbfc;}
-    .inp-selectors{display:flex;gap:8px;margin-bottom:6px;align-items:center;flex-wrap:wrap}
-    .inp-selector{display:flex;align-items:center;gap:4px}
-    .inp-selector label{font-size:12px;font-weight:600;color:var(--text2);
-                        white-space:nowrap;flex-shrink:0}
-    .inp-selector select{padding:4px 6px;border:1px solid var(--border);
-                        border-radius:6px;font-size:13px}
+    .inp-main-row{display:flex;gap:10px;align-items:stretch;margin-bottom:6px}
+    .inp-msg{flex:1;min-width:0}
+    .inp-selectors-stack{display:flex;flex-direction:column;gap:8px;flex-shrink:0;width:300px;
+                         padding:10px 12px;background:#f1f3f5;border:1px solid var(--border);
+                         border-radius:10px;justify-content:center}
+    .inp-selector{display:flex;align-items:center;gap:6px}
+    .inp-selector label{font-size:11px;font-weight:700;color:var(--text2);
+                        white-space:nowrap;min-width:48px;text-align:right;flex-shrink:0}
+    .inp-selector select{flex:1;min-width:0;padding:3px 5px;border:1px solid var(--border);
+                         border-radius:6px;font-size:12px;background:white}
     .inp-msg textarea{width:100%;resize:vertical;border:1px solid var(--border);
       border-radius:12px;padding:8px 12px;font-size:14px;font-family:inherit;
       outline:none;min-height:80px;max-height:200px}
@@ -261,11 +287,17 @@
     .qcard-txt li{display:inline}
     .qcard-txt br{display:none}
 
-    /* MD TOOLBAR dans inp-zone */
+    /* MD TOOLBAR dans inp-zone (grille 3 colonnes) */
+    .md-toolbar-grid{display:grid;grid-template-columns:repeat(3,auto);
+                     gap:2px;flex-shrink:0;padding:6px 5px;
+                     background:#f1f3f5;border:1px solid var(--border);
+                     border-radius:8px;align-content:start;
+                     align-items:center;justify-items:center}
     .md-btn{
-      padding:3px 7px;border:none;background:transparent;
-      border-radius:4px;font-size:14px;font-weight:700;
+      padding:3px 6px;border:none;background:transparent;
+      border-radius:4px;font-size:13px;font-weight:700;
       cursor:pointer;color:var(--text);line-height:1.4;
+      text-align:center;
     }
     .md-btn:hover{background:#dee2e6}
 
@@ -289,7 +321,34 @@
     .btn-edit-cancel{padding:4px 12px;background:var(--grey);color:white;
       border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer}
     .btn-edit-cancel:hover{opacity:.85}
-    
+
+    /* FULLSCREEN CARD OVERLAY */
+    #card-backdrop{
+      display:none;position:fixed;inset:0;
+      background:rgba(0,0,0,.45);z-index:999;
+      backdrop-filter:blur(2px);
+    }
+    .qcard.open.fullscreen{
+      position:fixed;inset:16px;z-index:1000;
+      margin:0 !important;border-radius:14px;
+      box-shadow:0 24px 64px rgba(0,0,0,.4);
+      height:auto !important;
+      animation:fsIn .18s ease;
+    }
+    @keyframes fsIn{
+      from{opacity:0;transform:scale(.97)}
+      to{opacity:1;transform:scale(1)}
+    }
+    .btn-card-close{
+      position:absolute;top:8px;right:8px;width:28px;height:28px;
+      border-radius:50%;border:none;background:rgba(0,0,0,.12);
+      color:var(--text2);font-size:15px;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;
+      z-index:10;transition:all .15s;flex-shrink:0;
+    }
+    .btn-card-close:hover{background:var(--red);color:white}
+    .qcard.open.fullscreen .qcard-head{position:relative;padding-right:44px}
+
   </style>
 </head>
 <body>
@@ -329,6 +388,9 @@
       <span class="count" id="qCount"></span>
     </div>
   </div>
+
+  <!-- BACKDROP FULLSCREEN -->
+  <div id="card-backdrop" onclick="closeCard()"></div>
 
   <!-- QUESTION LIST -->
   <div id="qList">

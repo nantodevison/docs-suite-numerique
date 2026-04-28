@@ -105,6 +105,7 @@ function selectCh(id) {
 
   // Afficher le bouton reset
   document.getElementById('btnReset').classList.add('visible');
+  document.getElementById('chList').style.display = 'none';
 
   // Render preview en Markdown
   var preview = document.getElementById('chPrev');
@@ -133,6 +134,7 @@ function resetSelection() {
 
   // Masquer le bouton reset et le preview
   document.getElementById('btnReset').classList.remove('visible');
+  document.getElementById('chList').style.display = '';
   document.getElementById('chPrev').classList.remove('visible');
 }
 
