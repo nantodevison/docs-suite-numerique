@@ -384,32 +384,16 @@ function renderQList() {
         return '<option value="'+u.id+'">'+esc(u.display||u.nom)+'</option>';
       }).join('');
 
-    // Doublon UI
-    var doublonHtml;
-    if (q.est_doublon && q.doublon_de) {
-      doublonHtml = '<div style="margin-top:6px">' +
-        '<span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:6px;font-size:11px;font-weight:600">🔁 Doublon de Q-'+String(q.doublon_de).padStart(4,'0')+'</span>' +
-        ' <button onclick="event.stopPropagation();unmarkDuplicate('+q.id+')" ' +
-          'style="font-size:10px;padding:1px 5px;border:1px solid var(--red);background:white;color:var(--red);border-radius:4px;cursor:pointer">✖ Annuler</button>' +
-      '</div>';
-    } else {
-      var dupOptions = '<option value="">— Question source —</option>' +
-        allQuestions.filter(function(x){ return x.id !== q.id; }).map(function(x){
-          return '<option value="'+x.id+'">Q-'+String(x.id).padStart(4,'0')+' – '+esc((x.contenu||'').substring(0,50))+'</option>';
-        }).join('');
-      doublonHtml = '<div style="margin-top:6px">' +
-        '<button id="btnDuplon_'+q.id+'" onclick="event.stopPropagation();showDuplicateForm('+q.id+')" ' +
-          'style="font-size:11px;padding:2px 8px;border:1px solid #92400e;background:white;color:#92400e;border-radius:4px;cursor:pointer;font-weight:600">' +
-          '🔁 Marquer doublon</button>' +
-        '<div id="dupForm_'+q.id+'" style="display:none;margin-top:4px">' +
-          '<select id="dupSel_'+q.id+'" style="width:100%;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px">'+dupOptions+'</select>' +
-          '<div style="display:flex;gap:4px;margin-top:3px">' +
-            '<button onclick="event.stopPropagation();saveDuplicate('+q.id+')" style="font-size:11px;padding:2px 8px;background:#f59e0b;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600">✔ Valider</button>' +
-            '<button onclick="event.stopPropagation();hideDuplicateForm('+q.id+')" style="font-size:11px;padding:2px 8px;background:var(--grey);color:white;border:none;border-radius:4px;cursor:pointer">✖</button>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
-    }
+    // Options doublon (toujours calculées, utilisées dans le form btn-row)
+    var dupOptions = '<option value="">— Question source —</option>' +
+      allQuestions.filter(function(x){ return x.id !== q.id; }).map(function(x){
+        return '<option value="'+x.id+'">Q-'+String(x.id).padStart(4,'0')+' – '+esc((x.contenu||'').substring(0,50))+'</option>';
+      }).join('');
+
+    // Badge doublon (info-panel COL 1 : lecture seule)
+    var doublonBadge = (q.est_doublon && q.doublon_de)
+      ? '<div style="margin-top:6px"><span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:6px;font-size:11px;font-weight:600">🔁 Doublon de Q-'+String(q.doublon_de).padStart(4,'0')+'</span></div>'
+      : '';
 
     return '<div class="qcard'+(isOpen?' open selected':'')+'" data-id="'+q.id+'">' +
 
@@ -439,7 +423,7 @@ function renderQList() {
             '<dt>Auteur</dt><dd>'+esc(au?(au.display||au.nom):'?')+'</dd>' +
             '<dt>Date</dt><dd>'+(q.date_creation?new Date(q.date_creation*1000).toLocaleDateString('fr-FR'):'—')+'</dd>' +
           '</dl>' +
-          doublonHtml +
+          doublonBadge +
         '</div>' +
 
         // COL 2 : Thèmes
@@ -529,7 +513,17 @@ function renderQList() {
           '<div class="btn-row">' +
             '<button class="btn btn-send" onclick="sendResp('+q.id+')">💬 Envoyer</button>' +
             '<button class="btn btn-close" onclick="closeQuestion('+q.id+')">🔒 Clôturer</button>' +
+            (q.est_doublon && q.doublon_de
+              ? '<button class="btn btn-doublon-off" onclick="unmarkDuplicate('+q.id+')">✖ Retirer doublon</button>'
+              : '<button class="btn btn-doublon" id="btnDuplon_'+q.id+'" onclick="showDuplicateForm('+q.id+')">🔁 Doublon</button>') +
             '<button class="btn btn-notify" id="btnNotify_'+q.id+'" onclick="notifyAuthor('+q.id+')" style="display:none">✉️ Notifier auteur</button>' +
+          '</div>' +
+          '<div id="dupForm_'+q.id+'" style="display:none;padding:6px 0 2px">' +
+            '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
+              '<select id="dupSel_'+q.id+'" style="flex:1;min-width:150px;max-width:320px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px">'+dupOptions+'</select>' +
+              '<button onclick="event.stopPropagation();saveDuplicate('+q.id+')" style="padding:4px 12px;background:#f59e0b;color:white;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0">✔ Valider</button>' +
+              '<button onclick="event.stopPropagation();hideDuplicateForm('+q.id+')" style="padding:4px 10px;background:var(--grey);color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;flex-shrink:0">✖</button>' +
+            '</div>' +
           '</div>' +
         '</div>'
         ) +
@@ -754,7 +748,9 @@ function renderMsgs(qId, msgs, question) {
     var u = usersMap[m.auteur];
     var nm = u?(u.display||u.nom):'User#'+m.auteur;
     var role = u?u.role:'user';
-    var ic = role==='admin'?'🛡️':'👤';
+    var ic = role==='admin'
+      ? '<span style="display:inline-block;padding:1px 5px;background:#dbeafe;color:#1e40af;border-radius:3px;font-size:10px;font-weight:700;line-height:16px;vertical-align:middle">ADM</span>'
+      : '';
     var side = m.auteur===currentUserId?'right':'left';
     var tm = m.date?new Date(m.date*1000).toLocaleString('fr-FR'):'';
 
@@ -799,7 +795,7 @@ function renderMsgs(qId, msgs, question) {
       : '';
 
     return '<div class="msg '+side+'" id="msgrow_'+m.id+'">' +
-      '<span class="msg-head">'+ic+' '+esc(nm)+' - '+tm+statusHtml+' '+editBtn+'</span>' +
+      '<span class="msg-head">'+(ic ? ic+' ' : '')+esc(nm)+' - '+tm+statusHtml+' '+editBtn+'</span>' +
       '<div style="display:flex;align-items:flex-start;gap:6px">' +
         '<div class="msg-bubble" id="msgbubble_'+m.id+'">'+renderMarkdown(m.contenu||'')+'</div>' +
         '<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;padding-top:4px">' +
@@ -1226,16 +1222,12 @@ function toggleTxt(qId) {
 // ══════════════════════════════════════════════════════
 function showDuplicateForm(qId) {
   var form = document.getElementById('dupForm_'+qId);
-  var btn  = document.getElementById('btnDuplon_'+qId);
   if (form) form.style.display = 'block';
-  if (btn)  btn.style.display  = 'none';
 }
 
 function hideDuplicateForm(qId) {
   var form = document.getElementById('dupForm_'+qId);
-  var btn  = document.getElementById('btnDuplon_'+qId);
   if (form) form.style.display = 'none';
-  if (btn)  btn.style.display  = '';
 }
 
 async function saveDuplicate(qId) {
