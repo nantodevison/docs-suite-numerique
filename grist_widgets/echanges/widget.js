@@ -95,16 +95,16 @@ async function loadRef() {
         console.log('🎯 Identifié comme:', matched.nom);
       } else {
         console.warn('❌ Aucun match pour:', gristEmail);
-        var admins = Object.values(usersMap).filter(function(u){ return u.role==='admin'; });
+        var admins = Object.values(usersMap).filter(function(u){ return u.role==='👑 admin'; });
         if (admins.length) currentUserId = admins[0].id;
       }
     } else {
-      var admins = Object.values(usersMap).filter(function(u){ return u.role==='admin'; });
+      var admins = Object.values(usersMap).filter(function(u){ return u.role==='👑 admin'; });
       if (admins.length) currentUserId = admins[0].id;
     }
   } catch(e) {
     console.warn('Identification:', e);
-    var admins = Object.values(usersMap).filter(function(u){ return u.role==='admin'; });
+    var admins = Object.values(usersMap).filter(function(u){ return u.role==='👑 admin'; });
     if (admins.length) currentUserId = admins[0].id;
   }
 
@@ -480,17 +480,17 @@ function renderQList() {
           '<div class="validated-banner">✅ Réponse validée par l\'auteur</div>' :
         '<div class="inp-zone" id="inp_'+q.id+'">' +
           '<div class="inp-selectors">' +
-            '<div class="inp-selector"><label>Qui</label>' +
-              '<select id="selUser_'+q.id+'">'+userOptions()+'</select></div>' +
-            '<div class="inp-selector"><label>Source</label>' +
-              '<select id="selSrc_'+q.id+'">' +
+            '<div class="inp-selector" style="flex:0 0 auto"><label>Qui</label>' +
+              '<select id="selUser_'+q.id+'" style="max-width:325px">'+userOptions()+'</select></div>' +
+            '<div class="inp-selector" style="flex:0 0 auto"><label>Source</label>' +
+              '<select id="selSrc_'+q.id+'" style="width:250px">' +
                 '<option value="doc_reference">📖 Doc référence</option>' +
-                '<option value="admin">🛡️ Admin</option>' +
+                '<option value="admin">👑 Admin</option>' +
                 '<option value="autre_question">🔄 Autre question</option>' +
                 '<option value="autre">💡 Autre</option>' +
               '</select></div>' +
-            '<div class="inp-selector"><label>Chapitre</label>' +
-              '<select id="selCh_'+q.id+'"><option value="">— Aucun —</option>'+chapOptions()+'</select></div>' +
+            '<div class="inp-selector" style="flex:1;min-width:80px"><label>Chapitre</label>' +
+              '<select id="selCh_'+q.id+'" style="width:100%"><option value="">— Aucun —</option>'+chapOptions()+'</select></div>' +
           '</div>' +
           '<div class="inp-msg">' +
             '<div class="md-toolbar" style="background:#f1f3f5;border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;padding:4px 6px;display:flex;gap:2px;flex-wrap:wrap">' +
