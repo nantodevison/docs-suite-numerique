@@ -114,6 +114,7 @@ function selectCh(id) {
   // Remplir le corps en Markdown
   var preview = document.getElementById('chPrev');
   preview.innerHTML = marked.parse(ch.contenu || 'Aucun contenu disponible');
+  preview.classList.add('visible');
   preview.scrollTop = 0;
 
   // Ouvrir le backdrop + modale
@@ -127,6 +128,7 @@ function resetSelection() {
   // Fermer backdrop + modale
   document.getElementById('ch-backdrop').style.display = 'none';
   document.getElementById('chModal').classList.remove('visible');
+  document.getElementById('chPrev').classList.remove('visible');
 
   // Désélectionner les items
   document.querySelectorAll('.ch-item').forEach(function(el){
