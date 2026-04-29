@@ -230,6 +230,29 @@ class DocsClient:
     # ──────────────────────────────────────────────
 
     @staticmethod
+    def _strip_emojis(text: str) -> str:
+        """Nettoie le texte : supprime emojis, caractères invisibles et hors-BMP."""
+        import re
+        # Supprime les blocs de code fencés (```lang ... ```) — déclenchent le WAF (SQL, etc.)
+        text = re.sub(r'```[^\n]*\n.*?```', '', text, flags=re.DOTALL)
+        # Caractères invisibles / zero-width
+        text = re.sub(r'[\u200b\u200c\u200d\u200e\u200f\ufeff\u00ad]', '', text)
+        # Espace insécable → espace normale
+        text = text.replace('\xa0', ' ')
+        # Emojis BMP (blocs Unicode connus)
+        text = re.sub(
+            r'[\u2000-\u2bff'       # Flèches, symboles divers, dingbats
+            r'\u2e00-\u2e7f'        # Ponctuation supplémentaire
+            r'\u3000-\u303f'        # Ponctuation CJK
+            r'\ufe00-\ufe0f'        # Sélecteurs de variation
+            r'\ufe30-\ufe4f]',      # Formes compatibles CJK
+            '', text
+        )
+        # Caractères hors BMP (🌟 etc.)
+        text = re.sub(r'[^\u0000-\uFFFF]', '', text)
+        return text.strip()
+
+    @staticmethod
     def _path_to_ordre(path: str) -> int:
         """
         Convertit le dernier segment de 7 caractères du path (base-36) en entier.
@@ -264,7 +287,7 @@ class DocsClient:
         records = []
 
         doc_id = node.get("id", "")
-        titre = node.get("title", "")
+        titre = self._strip_emojis(node.get("title", ""))
         niveau = node.get("depth", 1)
         path = node.get("path", "")
 
@@ -326,7 +349,7 @@ class DocsClient:
                 "ordre": ordre,
                 "numero": numero,
                 "url": url,
-                "contenu": contenu,
+                "contenu": self._strip_emojis(contenu)[:8000],
             }
         })
 
