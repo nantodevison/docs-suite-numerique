@@ -18,6 +18,18 @@ var currentUserId = null;
 
 grist.ready({ requiredAccess: 'full' });
 init();
+
+// ══════════════════════════════════════════════════════
+//  MODALE FORMULAIRE
+// ══════════════════════════════════════════════════════
+function openQForm() {
+  document.getElementById('q-backdrop').style.display = 'block';
+  document.getElementById('q-modal').classList.add('visible');
+}
+function closeQForm() {
+  document.getElementById('q-backdrop').style.display = 'none';
+  document.getElementById('q-modal').classList.remove('visible');
+}
 setupImagePaste();
 
 // ══════════════════════════════════════════════════════
@@ -305,6 +317,7 @@ async function submitQ() {
     renderThemeTags();
     refreshThemeDatalist();
     document.getElementById('inQ').value = '';
+    closeQForm();
     document.getElementById('modalRef').textContent = ref;
     document.getElementById('modal').style.display = 'flex';
 

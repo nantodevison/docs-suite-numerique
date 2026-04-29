@@ -1017,12 +1017,14 @@ class DocsClient:
         records = []
 
         doc_id = node.get("id", "")
-        titre = self._strip_emojis(node.get("title", ""))
+        raw_titre = node.get("title", "")
         niveau = node.get("depth", 1)
         path = node.get("path", "")
 
-        # Extraction de l'émoji de tête du titre (logique identique au frontend)
-        emoji, titre_propre = self.extract_emoji_from_title(titre)
+        # _strip_emojis est réservé au contenu (risque WAF) — pas aux titres.
+        # On utilise le titre brut directement pour préserver les émojis.
+        titre = raw_titre
+        emoji, titre_propre = self.extract_emoji_from_title(raw_titre)
 
         children = node.get("children", [])
         numchild = node.get("numchild", 0)

@@ -64,6 +64,41 @@
     /* ITEM MASQUÉ */
     .ch-item.hidden{display:none}
 
+    /* FULLSCREEN CHAPTER OVERLAY */
+    #ch-backdrop{
+      display:none;position:fixed;inset:0;
+      background:rgba(0,0,0,.45);z-index:999;
+      backdrop-filter:blur(2px);
+    }
+    .ch-modal{
+      position:fixed;inset:16px;z-index:1000;
+      background:var(--card);border-radius:14px;
+      box-shadow:0 24px 64px rgba(0,0,0,.4);
+      display:none;flex-direction:column;overflow:hidden;
+    }
+    .ch-modal.visible{display:flex;animation:fsIn .18s ease}
+    @keyframes fsIn{
+      from{opacity:0;transform:scale(.97)}
+      to{opacity:1;transform:scale(1)}
+    }
+    .ch-modal-header{
+      padding:12px 16px;border-bottom:1px solid var(--border);
+      display:flex;align-items:baseline;gap:10px;
+      background:#fafbfc;flex-shrink:0;position:relative;
+      padding-right:48px;
+    }
+    .ch-modal-body{
+      flex:1;overflow-y:auto;padding:20px;
+    }
+    .btn-ch-close{
+      position:absolute;top:10px;right:12px;width:28px;height:28px;
+      border-radius:50%;border:none;background:rgba(0,0,0,.10);
+      color:var(--text2);font-size:15px;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;
+      transition:all .15s;
+    }
+    .btn-ch-close:hover{background:var(--red);color:white}
+
   </style>
 </head>
 <body>
@@ -113,13 +148,21 @@
     <div class="search-box">
       <input type="text" id="searchCh" placeholder="Rechercher un chapitre…" oninput="filterCh(this.value)">
     </div>
-    <button class="btn-reset" id="btnReset" onclick="resetSelection()">
-      ← Voir tous les chapitres
-    </button>
     <div class="ch-list" id="chList">
       <div class="empty">⏳ Chargement…</div>
     </div>
-    <div class="ch-preview" id="chPrev"></div>
+  </div>
+
+  <!-- BACKDROP FULLSCREEN -->
+  <div id="ch-backdrop" onclick="resetSelection()"></div>
+
+  <!-- MODALE CHAPITRE -->
+  <div class="ch-modal" id="chModal">
+    <div class="ch-modal-header">
+      <div id="chModalTitle"></div>
+      <button class="btn-ch-close" onclick="resetSelection()" title="Fermer">✕</button>
+    </div>
+    <div class="ch-modal-body ch-preview" id="chPrev"></div>
   </div>
 
 </body>

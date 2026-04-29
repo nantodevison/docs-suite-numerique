@@ -96,46 +96,44 @@ function selectCh(id) {
   var ch = chapitres.find(function(c){ return c.id === id; });
   if (!ch) return;
 
-  // Masquer tous les items sauf le sélectionné
+  // Marquer l'item sélectionné dans la liste
   document.querySelectorAll('.ch-item').forEach(function(el){
-    var isSelected = +el.dataset.id === id;
-    el.classList.toggle('selected', isSelected);
-    el.classList.toggle('hidden', !isSelected);
+    el.classList.toggle('selected', +el.dataset.id === id);
   });
 
-  // Afficher le bouton reset
-  document.getElementById('btnReset').classList.add('visible');
-  document.getElementById('chList').style.display = 'none';
-
-  // Render preview en Markdown
-  var preview = document.getElementById('chPrev');
+  // Remplir le header de la modale
   var sourceLink = ch.url
     ? ' <a href="'+ch.url+'" target="_blank" rel="noopener noreferrer" '+
       'style="font-size:11px;color:var(--accent);font-weight:400">(Lien vers la source)</a>'
     : '';
-  console.log('url du chapitre:', ch.url, '| type:', typeof ch.url);
-  var header = '<div style="font-weight:700;color:var(--text);font-size:12px;margin-bottom:8px;'+
-    'padding-bottom:6px;border-bottom:1px solid #f5e6a3;display:flex;align-items:baseline;gap:12px">'+
-    '<span>§'+ch.numero+' '+esc(ch.titre)+'</span>'+sourceLink+'</div>';
-  var body = marked.parse(ch.contenu || 'Aucun contenu disponible');
-  preview.innerHTML = header + body;
-  preview.classList.add('visible');
+  document.getElementById('chModalTitle').innerHTML =
+    '<span style="font-weight:700;color:var(--text2);font-size:12px">§'+esc(ch.numero||'')+'</span>'+
+    ' <span style="font-weight:700;color:var(--text);font-size:14px">'+esc(ch.titre||'Sans titre')+'</span>'+
+    sourceLink;
 
+  // Remplir le corps en Markdown
+  var preview = document.getElementById('chPrev');
+  preview.innerHTML = marked.parse(ch.contenu || 'Aucun contenu disponible');
+  preview.classList.add('visible');
   preview.scrollTop = 0;
+
+  // Ouvrir le backdrop + modale
+  document.getElementById('ch-backdrop').style.display = 'block';
+  document.getElementById('chModal').classList.add('visible');
 }
 
 function resetSelection() {
   selectedChId = null;
 
-  // Ré-afficher tous les items
-  document.querySelectorAll('.ch-item').forEach(function(el){
-    el.classList.remove('selected', 'hidden');
-  });
-
-  // Masquer le bouton reset et le preview
-  document.getElementById('btnReset').classList.remove('visible');
-  document.getElementById('chList').style.display = '';
+  // Fermer backdrop + modale
+  document.getElementById('ch-backdrop').style.display = 'none';
+  document.getElementById('chModal').classList.remove('visible');
   document.getElementById('chPrev').classList.remove('visible');
+
+  // Désélectionner les items
+  document.querySelectorAll('.ch-item').forEach(function(el){
+    el.classList.remove('selected');
+  });
 }
 
 // ══════════════════════════════════════════════════════
