@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════════════
 //  CONFIG BREVO
 // ══════════════════════════════════════════════════════
+var NOTIFICATIONS_ENABLED = false; // ← mettre à true pour réactiver les envois d'emails
 var BREVO_API_KEY = BREVO_KEY ;
 var BREVO_SENDER_EMAIL = EMAIL ;
 var BREVO_SENDER_NAME = 'Plateforme Questions GT "Harmonisation CBS" -- DGPR';
@@ -559,6 +560,7 @@ async function saveCov(qId) {
 //  SEND SOLLICITATION (email via Brevo)
 // ══════════════════════════════════════════════════════
 async function sendSollicitation(qId) {
+  if (!NOTIFICATIONS_ENABLED) { alert('Les notifications email sont temporairement désactivées.'); return; }
   var btn = document.getElementById('btnSollic_'+qId);
   var targetId = +document.getElementById('selSollic_'+qId).value;
   var msg = document.getElementById('txtSollic_'+qId).value.trim();
@@ -916,6 +918,7 @@ async function sendResp(qId) {
 }
 
 async function notifyOnNewResponse(qId, responderId, responseText) {
+  if (!NOTIFICATIONS_ENABLED) return;
   var q = allQuestions.find(function(x){ return x.id===qId; });
   if (!q) return;
 
@@ -1072,6 +1075,7 @@ async function closeQuestion(qId) {
 //  NOTIFY AUTHOR (réponse proposée)
 // ══════════════════════════════════════════════════════
 async function notifyAuthor(qId) {
+  if (!NOTIFICATIONS_ENABLED) { toast('⚠️ Les notifications email sont temporairement désactivées.'); return; }
   var btn = document.getElementById('btnNotify_'+qId);
   if (btn) btn.disabled = true;
   try {
