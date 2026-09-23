@@ -7,12 +7,12 @@ Gardez-le court : quelques lignes par section suffisent.
 -->
 
 ## En cours
-- [ ] Fusionner la branche feat/restructuration (nouvelle structure widgets/ python/ espaces/ projets/)
+- [x] Fusionner la branche feat/restructuration (nouvelle structure widgets/ python/ espaces/ projets/) — PR #10, 2026-09-23
 
 ## Prochaines étapes
-- [ ] Kanban de Rémi : décider des crédits, puis ajouter la version d'origine dans `widgets/kanban/` (commit dédié)
-- [ ] Tester le Kanban par URL dans Grist, puis le généraliser (association de colonnes, « Sélectionner par » pour le projet, onglets configurables, références EPIC / `qui_`)
-- [ ] Commits non signés et « changes must be made through a pull request » : configurer la signature sur ce poste ou assouplir les règles du dépôt
+- [ ] Publier le Kanban de Rémi : valider les crédits avec lui, puis ajouter la version d'origine dans `widgets/kanban/` (commit dédié) et la tester par URL dans Grist
+- [ ] Étudier la réutilisation du Kanban pour d'autres projets que l'Observatoire, puis le généraliser (association de colonnes, « Sélectionner par » pour le projet, onglets configurables, références EPIC / `qui_`)
+- [ ] Valider la fiche type d'écoute client (Docs) avec May-Jeanne
 - [ ] Ajouter un fichier `.env.example` (cité dans `python/README.md`, mais absent du dépôt)
 
 ## Plus tard / idées
@@ -29,3 +29,5 @@ Gardez-le court : quelques lignes par section suffisent.
 - 2026-09-23 — les widgets du GT cartes de bruit ne sont plus en service — on prépare les futurs widgets plutôt que de migrer l'existant
 - 2026-09-23 — dépôt renommé pmd-suite-numerique, gardé sur le compte nantodevison — outils destinés au groupe PMD
 - 2026-09-23 — structure widgets/ (à plat, URL fixes) · python/ · espaces/ · projets/, avec catalogue des widgets — le classement évolue, les URL ne doivent pas bouger
+- 2026-09-23 — règles GitHub limitées à master (pas de suppression, pas de réécriture), ni signature des commits ni PR exigées — trop contraignant pour un dépôt maintenu à une ou deux personnes
+- 2026-09-23 — GitHub CLI (gh) installé en version portable dans %LOCALAPPDATA%\Programs\gh — pour que Claude puisse créer les PR
