@@ -29,43 +29,32 @@ Nom de table par défaut : **`Chapitres`**
 
 ## Options du widget
 
-Aucune option personnalisée n'est nécessaire. Le widget utilise uniquement
-le niveau d'accès `read table`.
+Aucune option personnalisée n'est nécessaire. Le widget demande le niveau
+d'accès complet (`full`).
 
 ## Déploiement dans Grist
 
-### Option A – Copier-coller (instance ministérielle sans internet)
+### Option A – Copier-coller (onglets HTML + JavaScript)
 
-1. Dans Grist, ajouter un widget de type **Custom Widget**.
-2. Choisir **"Saisir une URL ou coller du code"**.
-3. Coller l'intégralité du contenu de `index.html` **dans lequel vous aurez
-   inséré inline le contenu de `widget.js`** juste avant `</body>` :
+1. Dans Grist, ajouter un widget de type **Custom Widget** et choisir de coller du code.
+2. Coller le contenu de `index.html` dans l'onglet **HTML** et celui de `widget.js`
+   dans l'onglet **JavaScript**.
+3. Enregistrer. Le widget affiche immédiatement les chapitres de la vue active.
 
-   ```html
-   <!-- Remplacer la ligne <script src="widget.js"></script> par : -->
-   <script>
-     /* contenu de widget.js ici */
-   </script>
-   ```
+### Option B – URL (GitHub Pages)
 
-4. Enregistrer. Le widget affiche immédiatement les chapitres de la vue active.
-
-### Option B – URL GitHub Raw (instance avec accès internet)
-
-Pointer le widget sur :
 ```
-https://raw.githubusercontent.com/nantodevison/docs-suite-numerique/master/grist_widgets/parcours-doc/index.html
+https://nantodevison.github.io/docs-suite-numerique/grist_widgets/parcours-doc/
 ```
 
-> ⚠️ Dans ce cas, `index.html` charge `widget.js` via `<script src="widget.js">`.
-> Grist doit autoriser les URLs raw GitHub dans sa configuration CSP.
+Voir [../README.md](../README.md#brancher-un-widget-par-url-github-pages) pour l'avertissement et le niveau d'accès.
 
 ## Notes de sécurité
 
-- Le widget ne demande que l'accès `read table` (lecture seule).
+- Le widget demande l'accès complet (`full`), bien qu'il ne fasse que lire la table `Chapitres`.
 - Aucune clé API ni donnée sensible n'est incluse dans le code frontend.
-- Les images éventuellement présentes dans les contenus sont stockées en base64
-  directement dans la colonne Grist (pas d'appel réseau externe).
+- Les images présentes dans les contenus sont hébergées sur GitHub ou embarquées
+  en base64, selon la configuration de la synchronisation.
 
 ## Résolution de problèmes courants
 

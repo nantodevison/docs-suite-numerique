@@ -37,5 +37,9 @@ Configuration dans `.env` (voir le README pour la liste). L'authentification Doc
 - `grist_widgets/grist_code.py` est l'export du schéma du document Grist (tables `Chapitres`, `Questions`, `Reponses`, `Reponse_Chapitre_Link`, `Votes`, `Users`, `Widget_Session`, etc.). C'est la référence pour les noms de tables/colonnes utilisés par les widgets via `grist.docApi.fetchTable` / `applyUserActions`.
 - Pas de npm ni de bundler : chaque widget est un `index.html` + `widget.js` autonomes, dépendances uniquement via CDN ; `grist-plugin-api.js` est chargé depuis `https://docs.getgrist.com/grist-plugin-api.js`.
 - Toujours appeler `grist.ready()` avant tout appel à l'API Grist (sinon `RPC_UNKNOWN_FORWARD_DEST`).
-- Déploiement : copier-coller le code dans l'éditeur de Custom Widget de Grist (l'instance ministérielle n'a pas accès à internet), ou pointer l'URL raw GitHub quand c'est possible.
+- Déploiement, deux modes (testé avec succès le 2026-09-23 sur l'instance Grist utilisée par le GT) :
+  - **par URL (GitHub Pages)** : `https://nantodevison.github.io/docs-suite-numerique/grist_widgets/<widget>/`. Grist affiche un avertissement « source inconnue » à confirmer, puis il faut régler le niveau d'accès du widget sur « Accès complet ». Dans ce mode, l'arborescence du dépôt fait partie de l'URL : **déplacer un dossier de widget casse les widgets branchés dessus** ;
+  - **par copier-coller** dans l'éditeur de Custom Widget (onglet HTML : `index.html`, onglet JavaScript : `widget.js`).
+- Chaque `index.html` charge `widget.js` par `<script src="widget.js">` : indispensable en mode URL, sans effet en copier-coller.
+- Les URL raw GitHub (`raw.githubusercontent.com`) ne conviennent pas aux widgets (le HTML y est servi comme du texte brut) ; elles restent valables pour les images.
 - Le widget `echanges` envoie des emails via l'API Brevo ; c'est désactivé par `var NOTIFICATIONS_ENABLED = false;` en tête de `grist_widgets/echanges/widget.js` (fonctions `notifyOnNewResponse`, `sendSollicitation`, `notifyAuthor`).

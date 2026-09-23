@@ -7,9 +7,13 @@ Gardez-le court : quelques lignes par section suffisent.
 -->
 
 ## En cours
-- [ ] Fusionner la branche chore/claude-md (CLAUDE.md + .gitignore)
+- [x] Fusionner la branche chore/claude-md (CLAUDE.md + .gitignore) — PR #8, 2026-09-23
+- [ ] Fusionner la branche test/github-pages (widgets servis par URL + doc de déploiement)
 
 ## Prochaines étapes
+- [ ] Après fusion de test/github-pages, basculer la source de GitHub Pages sur master
+- [ ] Préparer le terrain des futurs widgets : structure par projets, dossier `commun/`, gabarit de widget prêt pour GitHub Pages
+- [ ] Commits non signés : configurer la signature sur ce poste ou assouplir la règle du dépôt
 - [ ] Compléter cette feuille de route (point 2 de l'état des lieux)
 
 ## Plus tard / idées
@@ -20,4 +24,6 @@ Gardez-le court : quelques lignes par section suffisent.
 
 ## Décisions récentes
 <!-- Une ligne par décision : date — décision — raison en quelques mots -->
-- 2026-09-23 — .vscode/ entièrement ignoré par Git — réglages propres au poste
+- 2026-09-23 — .vscode/settings.json n'est plus suivi par Git (tasks, launch et extensions le restent) — réglages propres au poste
+- 2026-09-23 — les widgets peuvent être servis par GitHub Pages — test concluant avec parcours-doc sur l'instance Grist
+- 2026-09-23 — les widgets du GT cartes de bruit ne sont plus en service — on prépare les futurs widgets plutôt que de migrer l'existant
