@@ -25,7 +25,7 @@ Nom de table par défaut : **`Chapitres`**
 | `url`         | Text    | ☐           | URL du chapitre dans Docs                      |
 | `contenu`     | Text    | ☐           | Contenu Markdown du chapitre                   |
 
-> Ces colonnes sont produites automatiquement par `src/sync.py`.
+> Ces colonnes sont produites automatiquement par `python/sync.py`.
 
 ## Options du widget
 
@@ -44,7 +44,7 @@ d'accès complet (`full`).
 ### Option B – URL (GitHub Pages)
 
 ```
-https://nantodevison.github.io/docs-suite-numerique/grist_widgets/parcours-doc/
+https://nantodevison.github.io/pmd-suite-numerique/widgets/parcours-doc/
 ```
 
 Voir [../README.md](../README.md#brancher-un-widget-par-url-github-pages) pour l'avertissement et le niveau d'accès.

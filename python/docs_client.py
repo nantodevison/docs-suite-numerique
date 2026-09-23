@@ -96,7 +96,7 @@ class DocsClient:
     """Client pour interagir avec l'API Docs."""
 
     def __init__(self, base_url, token=None, session_id=None, csrf_token=None,
-                 github_token=None, github_repo="nantodevison/docs-suite-numerique",
+                 github_token=None, github_repo="nantodevison/pmd-suite-numerique",
                  github_images_branch="master", github_images_folder="images"):
         """
         Args:

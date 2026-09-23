@@ -51,7 +51,7 @@ Accès requis : complet (`full`) ; le widget écrit dans le document
 ### Option B – URL (GitHub Pages)
 
 ```
-https://nantodevison.github.io/docs-suite-numerique/grist_widgets/questions/
+https://nantodevison.github.io/pmd-suite-numerique/widgets/questions/
 ```
 
 Voir [../README.md](../README.md#brancher-un-widget-par-url-github-pages) pour l'avertissement et le niveau d'accès.
