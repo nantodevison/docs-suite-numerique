@@ -51,7 +51,7 @@ Le widget demande l'accès complet (`full`) : il écrit dans le document
 ### Option B – URL (GitHub Pages)
 
 ```
-https://nantodevison.github.io/docs-suite-numerique/grist_widgets/echanges/
+https://nantodevison.github.io/pmd-suite-numerique/widgets/echanges/
 ```
 
 Voir [../README.md](../README.md#brancher-un-widget-par-url-github-pages) pour l'avertissement et le niveau d'accès.
