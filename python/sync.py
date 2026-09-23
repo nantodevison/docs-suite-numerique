@@ -16,7 +16,7 @@ Variables optionnelles :
     GITHUB_TOKEN        PAT GitHub (scope contents:write) pour héberger
                         les images internes Docs en public sur GitHub.
                         Sans ce token, les images sont embarquées en base64.
-    GITHUB_REPO         Repo GitHub cible (défaut : nantodevison/docs-suite-numerique)
+    GITHUB_REPO         Repo GitHub cible (défaut : nantodevison/pmd-suite-numerique)
     GITHUB_IMAGES_FOLDER Dossier images dans le repo (défaut : images)
 """
 
@@ -60,7 +60,7 @@ def sync_chapitres(root_url_or_id: str) -> tuple[list, list]:
     load_dotenv()
 
     docs_base = os.environ.get("DOCS_BASE_URL", "https://docs.numerique.gouv.fr")
-    github_repo = os.environ.get("GITHUB_REPO", "nantodevison/docs-suite-numerique")
+    github_repo = os.environ.get("GITHUB_REPO", "nantodevison/pmd-suite-numerique")
     github_folder = os.environ.get("GITHUB_IMAGES_FOLDER", "images")
 
     # ── Clients ──────────────────────────────────────────────────────────────

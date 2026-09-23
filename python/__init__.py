@@ -1,3 +1,3 @@
 """
-docs-suite-numerique – package de synchronisation Docs ↔ Grist.
+pmd-suite-numerique – package de synchronisation Docs ↔ Grist.
 """
