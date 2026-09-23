@@ -36,31 +36,33 @@ Nom de table suggéré : **`Questions`**
 
 ## Options du widget
 
-Accès requis : `read table` (lecture seule).
+Accès requis : complet (`full`) ; le widget écrit dans le document
+(via `applyUserActions`).
 
 ## Déploiement dans Grist
 
-### Option A – Copier-coller (instance ministérielle sans internet)
+### Option A – Copier-coller (onglets HTML + JavaScript)
 
-1. Fusionner `widget.js` dans `index.html` :
-   remplacer `<script src="widget.js"></script>` par le contenu de `widget.js`
-   dans une balise `<script>`.
-2. Dans Grist, ajouter un **Custom Widget** et coller le HTML complet.
+1. Dans Grist, ajouter un **Custom Widget** et choisir de coller du code.
+2. Coller le contenu de `index.html` dans l'onglet **HTML** et celui de `widget.js`
+   dans l'onglet **JavaScript**.
 3. Dans les options du widget, mapper les colonnes de la table `Questions`.
 
-### Option B – URL GitHub Raw
+### Option B – URL (GitHub Pages)
 
 ```
-https://raw.githubusercontent.com/nantodevison/docs-suite-numerique/master/grist_widgets/questions/index.html
+https://nantodevison.github.io/docs-suite-numerique/grist_widgets/questions/
 ```
+
+Voir [../README.md](../README.md#brancher-un-widget-par-url-github-pages) pour l'avertissement et le niveau d'accès.
 
 ## Notes de sécurité
 
-- Lecture seule (`read table`) : aucune modification n'est effectuée dans Grist.
+- Accès complet (`full`) : le widget peut modifier les données du document.
 - Tout le contenu affiché est échappé HTML pour prévenir les injections XSS.
 - Pas de clé API ni de token dans le code frontend.
-- Si les questions contiennent des images (issues de Docs), elles sont stockées
-  en base64 dans Grist et s'affichent directement sans appel réseau externe.
+- Si les questions contiennent des images (issues de Docs), elles sont hébergées
+  sur GitHub ou embarquées en base64, selon la configuration de la synchronisation.
 
 ## Résolution de problèmes courants
 

@@ -36,28 +36,29 @@ Le widget reconnaît automatiquement les variantes suivantes :
 
 ## Options du widget
 
-Le widget ne demande que l'accès `read table` (lecture seule). Aucune écriture
-n'est effectuée dans Grist depuis ce widget.
+Le widget demande l'accès complet (`full`) : il écrit dans le document
+(via `applyUserActions`).
 
 ## Déploiement dans Grist
 
-### Option A – Copier-coller (instance ministérielle sans internet)
+### Option A – Copier-coller (onglets HTML + JavaScript)
 
-1. Fusionner `widget.js` dans `index.html` :
-   remplacer `<script src="widget.js"></script>` par le contenu de `widget.js`
-   dans une balise `<script>`.
-2. Dans Grist, ajouter un **Custom Widget** et coller le HTML complet.
+1. Dans Grist, ajouter un **Custom Widget** et choisir de coller du code.
+2. Coller le contenu de `index.html` dans l'onglet **HTML** et celui de `widget.js`
+   dans l'onglet **JavaScript**.
 3. Dans les options du widget, mapper les colonnes de la table `Echanges`.
 
-### Option B – URL GitHub Raw
+### Option B – URL (GitHub Pages)
 
 ```
-https://raw.githubusercontent.com/nantodevison/docs-suite-numerique/master/grist_widgets/echanges/index.html
+https://nantodevison.github.io/docs-suite-numerique/grist_widgets/echanges/
 ```
+
+Voir [../README.md](../README.md#brancher-un-widget-par-url-github-pages) pour l'avertissement et le niveau d'accès.
 
 ## Notes de sécurité
 
-- Lecture seule (`read table`) : aucune modification de données n'est possible.
+- Accès complet (`full`) : le widget peut modifier les données du document.
 - Pas de secret ni de clé API dans le code frontend.
 - Le contenu des messages est affiché en texte brut (échappement HTML systématique)
   pour éviter toute injection XSS.

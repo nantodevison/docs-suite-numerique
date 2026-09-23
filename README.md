@@ -180,5 +180,5 @@ Ouvrir `notebooks/test_sync.ipynb` et exécuter les cellules dans l'ordre :
 Le dossier [`grist_widgets/`](grist_widgets/) contient les widgets personnalisés
 Grist (HTML/CSS/JS).
 
-Pour les déployer sur une instance Grist sans accès internet, consulter
+Pour les déployer (par URL GitHub Pages ou par copier-coller), consulter
 [`grist_widgets/README.md`](grist_widgets/README.md).
