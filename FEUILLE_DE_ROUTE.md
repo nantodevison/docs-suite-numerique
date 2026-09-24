@@ -10,8 +10,10 @@ Gardez-le court : quelques lignes par section suffisent.
 - [x] Fusionner la branche feat/restructuration (nouvelle structure widgets/ python/ espaces/ projets/) — PR #10, 2026-09-23
 
 ## Prochaines étapes
-- [ ] Publier le Kanban de Rémi : valider les crédits avec lui, puis ajouter la version d'origine dans `widgets/kanban/` (commit dédié) et la tester par URL dans Grist
-- [ ] Étudier la réutilisation du Kanban pour d'autres projets que l'Observatoire, puis le généraliser (association de colonnes, « Sélectionner par » pour le projet, onglets configurables, références EPIC / `qui_`)
+- [x] Publier le Kanban de Rémi (PR #11) et corriger l'écriture des références et du nom de table (PR #12), testé par URL le 2026-09-24
+- [ ] **Étape suivante** — Généraliser le Kanban pour un usage hors Observatoire (Écoute client, Valorisation) : retirer les valeurs codées en dur (projet OTV, contacts autorisés, noms d'EPICs et de tables), s'appuyer sur « Sélectionner par » pour le projet, rendre les onglets configurables
+- [ ] Basculer le Kanban de l'Observatoire du builder vers la version par URL (à voir avec Rémi)
+- [ ] Réparer les cellules EPIC / `qui_` invalides du document réel (en cours, par Martin)
 - [ ] Valider la fiche type d'écoute client (Docs) avec May-Jeanne
 - [ ] Ajouter un fichier `.env.example` (cité dans `python/README.md`, mais absent du dépôt)
 
@@ -31,3 +33,4 @@ Gardez-le court : quelques lignes par section suffisent.
 - 2026-09-23 — structure widgets/ (à plat, URL fixes) · python/ · espaces/ · projets/, avec catalogue des widgets — le classement évolue, les URL ne doivent pas bouger
 - 2026-09-23 — règles GitHub limitées à master (pas de suppression, pas de réécriture), ni signature des commits ni PR exigées — trop contraignant pour un dépôt maintenu à une ou deux personnes
 - 2026-09-23 — GitHub CLI (gh) installé en version portable dans %LOCALAPPDATA%\Programs\gh — pour que Claude puisse créer les PR
+- 2026-09-24 — Rémi crédité comme co-auteur du Kanban (adresse noreply GitHub) — reconnaissance de son travail sans publier d'adresse personnelle

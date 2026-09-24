@@ -57,7 +57,7 @@ du 2026-09-24 (sur une copie du document de gestion de projets).
   EPICs, et sur des listes de statuts propres au projet ;
 - les tables `Projets2`, `Contacts` et `EPICs` sont lues par leur nom.
 
-**Corrigé le 2026-09-24 (à valider en test) :**
+**Corrigé et validé en test le 2026-09-24 :**
 - les champs de type référence (EPIC, Assigné à) étaient enregistrés comme du
   **texte** : la cellule devenait invalide dans Grist, et le badge affichait
   `#Invalid Ref` (EPIC) ou `#Invalid RefList` (`qui_`). Le widget lit
@@ -67,10 +67,11 @@ du 2026-09-24 (sur une copie du document de gestion de projets).
   affichait une autre table : le widget demande désormais à Grist le nom réel
   de sa table.
 
-**En attendant la validation du correctif, ne pas modifier EPIC et Assigné à
-depuis le panneau ✏️ dans le document réel.** Les cellules abîmées par la
-version d'origine se réparent dans Grist en resélectionnant la valeur (ou via
-le panneau corrigé, si le texte correspond à un nom connu).
+**La version collée dans le Custom Widget Builder du document réel de
+l'Observatoire contient encore ces deux bugs : préférer la version par URL.**
+Les cellules abîmées par la version d'origine se réparent dans Grist en
+resélectionnant la valeur (ou via le panneau corrigé, si le texte correspond à
+un nom connu).
 
 **Autres défauts relevés à la lecture du code :**
 - `grist.ready()` est appelé deux fois, et un `fetchTable('EPICs')` est placé
