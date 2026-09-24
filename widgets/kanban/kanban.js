@@ -126,6 +126,16 @@ const DISPO_STATUT = '🆙Disponible';
 
 let _tableName = null;
 
+/* ── Correctif références ──────────────────────────────────────
+   Grist envoie au widget les colonnes de référence (EPIC, qui_) sous leur
+   forme AFFICHÉE (des noms), mais attend en écriture leur forme STOCKÉE
+   (des numéros de ligne). REFS mémorise, pour chaque champ de référence
+   associé, la correspondance numéro ↔ nom :
+     REFS.epic    = { estListe: false, tableVisee: 'EPICs',    options: [{id, nom}, …] }
+     REFS.assigne = { estListe: true,  tableVisee: 'Contacts', options: [{id, nom}, …] }
+   Il vaut null si le champ n'est pas associé ou n'est pas une référence. */
+const REFS = { epic: null, assigne: null };
+
 /* ══════════════════════════════════════════════════════════════
    1. INITIALISATION GRIST
    ══════════════════════════════════════════════════════════════ */
@@ -137,6 +147,17 @@ grist.ready({ requiredAccess: 'full' });
    ══════════════════════════════════════════════════════════════ */
 
 grist.ready({ requiredAccess: 'full' });
+
+// ✅ Correctif : récupérer le nom réel de la table liée au widget.
+// Sans cela, getTableName() retombe sur 'Taches' et les écritures partent
+// dans la table Taches même quand le widget affiche une autre table.
+(async () => {
+  try {
+    _tableName = await grist.getTable().getTableId();
+  } catch (err) {
+    console.warn('Kanban – nom de table introuvable, repli sur « Taches »:', err);
+  }
+})();
 
 // ✨ Récupérer les données de référence après l'initialisation
 (async () => {
@@ -638,9 +659,10 @@ function buildPrioBadge(val) {
    5. MODAL D'AJOUT DE CARTE
    ══════════════════════════════════════════════════════════════ */
 
-function openAddCardModal(statut) {
+async function openAddCardModal(statut) {
   STATE.addModal.statut = statut;
   document.getElementById('modal-statut-badge').textContent = statut;
+  await assurerReferences(); // ✅ Correctif : correspondances numéro ↔ nom à jour
   buildModalForm(statut);
   document.getElementById('add-card-modal').classList.remove('hidden');
 }
@@ -722,7 +744,8 @@ function buildModalForm(statut) {
 
     if (contactOptions.length > 0) {
       const values = ['', ...contactOptions.map(c => c.id)];
-      const labels = ['— aucun —', ...contactOptions.map(c => c.nom)];
+      // ✅ Correctif : libellé tel que Grist l'affiche (ex. « Prénom Nom »), à défaut Contacts.Nom
+      const labels = ['— aucun —', ...contactOptions.map(c => nomAffiche('assigne', c.id) || c.nom)];
       f.appendChild(makeSelect(values, labels, 'modal-assigne'));
     } else {
       // Fallback : champ texte
@@ -812,7 +835,10 @@ async function submitAddCardModal() {
     if (el && el.value !== '') {
       // Si c'est un nombre, c'est une référence, sinon c'est du texte
       const val = el.value;
-      newRecord[STATE.mapping[key]] = isNaN(val) ? val : Number(val);
+      let valeur = isNaN(val) ? val : Number(val);
+      // ✅ Correctif : une liste de références (ex. qui_) s'écrit ['L', numéro]
+      if (REFS[key] && REFS[key].estListe && typeof valeur === 'number') valeur = ['L', valeur];
+      newRecord[STATE.mapping[key]] = valeur;
     }
   });
 
@@ -860,12 +886,13 @@ async function deleteCard(recordId, titre) {
    6. PANNEAU D'ÉDITION
    ══════════════════════════════════════════════════════════════ */
 
-function openEditPanel(recordId) {
+async function openEditPanel(recordId) {
   const record = STATE.records.find(r => r.id === recordId);
   if (!record) return;
   STATE.editPanel.recordId = recordId;
   STATE.editPanel.dirty    = false;
   STATE.editPanel.fields   = {};
+  await assurerReferences(); // ✅ Correctif : correspondances numéro ↔ nom à jour
   populateEditPanel(record);
   document.getElementById('edit-panel').classList.add('open');
   document.getElementById('board').classList.add('panel-open');
@@ -912,6 +939,11 @@ function populateEditPanel(record) {
       });
       sel.addEventListener('change', () => markDirty('statut', sel.value));
       wrap.appendChild(sel);
+
+    } else if ((key === 'epic' || key === 'assigne') && REFS[key]) {
+      // ✅ Correctif : colonne de référence → liste de choix dont la valeur
+      // est le numéro de ligne (et non le nom affiché)
+      wrap.appendChild(construireChampReference(key, value));
 
     } else if (['priorite', 'assigne', 'millesime', 'epic'].includes(key)) {
       const existing = getUniqueFieldValues(key);
@@ -991,7 +1023,11 @@ async function saveEditPanel() {
     if (key === 'date' && value) {
       const d = new Date(value);
       updates[col] = isNaN(d) ? value : Math.floor(d.getTime() / 1000);
+    } else if (REFS[key] && REFS[key].estListe) {
+      // ✅ Correctif : une liste de références s'écrit ['L', n1, n2, …] (null si vide)
+      updates[col] = value.length ? ['L', ...value] : null;
     } else {
+      // Référence simple : value est déjà un numéro de ligne (0 = vide)
       updates[col] = value;
     }
   });
@@ -1139,6 +1175,155 @@ function onColumnDrop(e) {
   grist.setOption('columnOrder', STATE.columnOrder).catch(() => {});
   renderBoard();
   showToast('✓ Ordre des colonnes mis à jour');
+}
+
+/* ══════════════════════════════════════════════════════════════
+   8 bis. RÉFÉRENCES (correctif)
+   ══════════════════════════════════════════════════════════════
+   Pourquoi : Grist envoie au widget le NOM affiché d'une référence
+   (ex. « Martin Schoreisz »), mais une écriture doit fournir le NUMÉRO
+   de la ligne visée (ex. 20). On lit donc la description des colonnes
+   dans les tables internes de Grist (_grist_Tables, _grist_Tables_column)
+   pour savoir, pour chaque colonne de référence :
+     - quelle table elle vise (ex. Contacts),
+     - quelle colonne sert à l'afficher (ex. Nom_complet),
+   puis on construit la liste {id, nom} de toutes les lignes visées. */
+
+/**
+ * Décrit une colonne de référence de la table du widget.
+ * @param {string} tableId - table du widget (ex. 'Taches')
+ * @param {string} colId   - colonne à décrire (ex. 'qui_')
+ * @returns {Promise<{estListe:boolean, tableVisee:string, options:Array<{id:number, nom:string}>}|null>}
+ *          null si la colonne n'existe pas ou n'est pas une référence.
+ */
+async function chargerReference(tableId, colId) {
+  const tables   = await grist.docApi.fetchTable('_grist_Tables');
+  const colonnes = await grist.docApi.fetchTable('_grist_Tables_column');
+
+  // 1. Retrouver la ligne qui décrit la colonne (table + nom de colonne)
+  const idxTable = tables.tableId.indexOf(tableId);
+  if (idxTable === -1) return null;
+  const numeroTable = tables.id[idxTable];
+  const idxCol = colonnes.id.findIndex((_, i) =>
+    colonnes.parentId[i] === numeroTable && colonnes.colId[i] === colId);
+  if (idxCol === -1) return null;
+
+  // 2. Son type dit si c'est une référence : 'Ref:EPICs' ou 'RefList:Contacts'
+  const type = String(colonnes.type[idxCol]);
+  const correspondance = /^(Ref|RefList):(.+)$/.exec(type);
+  if (!correspondance) return null; // colonne ordinaire (texte, choix…)
+  const estListe   = correspondance[1] === 'RefList';
+  const tableVisee = correspondance[2];
+
+  // 3. La colonne affichée (visibleCol) est désignée par son numéro de ligne
+  //    dans _grist_Tables_column ; 0 = aucune, Grist affiche alors le numéro
+  const idxAffichee  = colonnes.id.indexOf(colonnes.visibleCol[idxCol]);
+  const colAffichee  = idxAffichee !== -1 ? colonnes.colId[idxAffichee] : null;
+
+  // 4. Liste de toutes les lignes visées, avec leur nom tel qu'affiché
+  const lignes = await grist.docApi.fetchTable(tableVisee);
+  const options = lignes.id.map((id, i) => ({
+    id,
+    nom: colAffichee ? String(lignes[colAffichee][i] ?? '') : String(id),
+  }));
+
+  return { estListe, tableVisee, options };
+}
+
+/** (Re)charge REFS pour les champs EPIC et Assigné à, selon l'association courante. */
+async function assurerReferences() {
+  for (const key of ['epic', 'assigne']) {
+    REFS[key] = null;
+    const col = STATE.mapping[key];
+    if (!col) continue;
+    try {
+      REFS[key] = await chargerReference(getTableName(), col);
+    } catch (err) {
+      // En cas d'échec, le widget garde le comportement de la version d'origine
+      console.error(`Kanban – lecture de la référence « ${col} » impossible:`, err);
+    }
+  }
+}
+
+/** Nom affiché d'une ligne visée par un champ de référence ('' si inconnu). */
+function nomAffiche(key, id) {
+  const ref = REFS[key];
+  const option = ref && ref.options.find(o => o.id === id);
+  return option ? option.nom : '';
+}
+
+/**
+ * Convertit la valeur reçue de Grist (nom, ou liste de noms) en numéros de ligne.
+ * Accepte aussi une cellule invalide (texte seul) : si le texte correspond à un
+ * nom connu, on retrouve le bon numéro, ce qui répare la cellule à l'enregistrement.
+ */
+function nomsVersIds(key, valeur) {
+  const ref = REFS[key];
+  if (!ref || valeur === null || valeur === undefined || valeur === '') return [];
+  const noms = Array.isArray(valeur) ? valeur : [valeur];
+  return noms
+    .map(n => typeof n === 'number' ? n : (ref.options.find(o => o.nom === String(n)) || {}).id)
+    .filter(id => id > 0);
+}
+
+/**
+ * Lignes proposées dans la liste de choix d'un champ de référence.
+ * Pour « Assigné à », on respecte la liste restreinte de contacts de la
+ * version d'origine (STATE.referenceData.contacts) quand elle existe, en
+ * gardant toujours les personnes déjà assignées : sinon, un simple
+ * enregistrement les retirerait sans prévenir.
+ */
+function optionsProposees(key, idsActuels) {
+  const ref = REFS[key];
+  if (key === 'assigne' && STATE.referenceData.contacts.length > 0) {
+    const autorises = STATE.referenceData.contacts.map(c => c.id);
+    return ref.options.filter(o => autorises.includes(o.id) || idsActuels.includes(o.id));
+  }
+  return ref.options;
+}
+
+/** Construit la liste de choix (simple ou multiple) d'un champ de référence du panneau d'édition. */
+function construireChampReference(key, valeurRecue) {
+  const ref = REFS[key];
+  const idsActuels = nomsVersIds(key, valeurRecue);
+
+  const sel = document.createElement('select');
+  sel.className = 'edit-control';
+
+  if (ref.estListe) {
+    // Liste de références : sélection multiple (Ctrl + clic)
+    sel.multiple = true;
+    sel.style.backgroundImage = 'none'; // pas de flèche de liste déroulante
+  } else {
+    const vide = document.createElement('option');
+    vide.value = '0'; vide.textContent = '— aucun —';
+    sel.appendChild(vide);
+  }
+
+  const options = optionsProposees(key, idsActuels);
+  options.forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = String(o.id); opt.textContent = o.nom || `(ligne ${o.id})`;
+    opt.selected = idsActuels.includes(o.id);
+    sel.appendChild(opt);
+  });
+  if (ref.estListe) sel.size = Math.min(Math.max(options.length, 2), 6);
+
+  // À chaque changement, on mémorise des NUMÉROS : liste pour RefList, nombre pour Ref (0 = vide)
+  sel.addEventListener('change', () => {
+    const ids = [...sel.selectedOptions].map(o => Number(o.value)).filter(n => n > 0);
+    markDirty(key, ref.estListe ? ids : (ids[0] || 0));
+  });
+
+  if (!ref.estListe) return sel;
+
+  // Pour la sélection multiple, une aide discrète sous la liste
+  const bloc = document.createElement('div');
+  const aide = document.createElement('div');
+  aide.textContent = 'Ctrl + clic pour choisir plusieurs personnes';
+  aide.style.cssText = 'font-size:11px;color:var(--text-muted);margin-top:4px';
+  bloc.appendChild(sel); bloc.appendChild(aide);
+  return bloc;
 }
 
 /* ══════════════════════════════════════════════════════════════
