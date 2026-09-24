@@ -34,7 +34,7 @@ La liste des widgets disponibles et la marche à suivre sont dans
 | Projet | État | Dossier |
 |---|---|---|
 | GT Harmonisation des méthodes de production des CBS (cartographie du bruit) | terminé, sert de référence | [`projets/gt-cbs-bruit/`](projets/gt-cbs-bruit/) |
-| Observatoire des trafics routiers de Nouvelle-Aquitaine | Kanban intégré (version d'origine), test par URL à faire | [`projets/observatoire-trafics/`](projets/observatoire-trafics/) |
+| Observatoire des trafics routiers de Nouvelle-Aquitaine | Kanban en service (version d'origine, testé par URL) | [`projets/observatoire-trafics/`](projets/observatoire-trafics/) |
 | Écoute client | en préparation (fiches dans Docs, puis rapatriement dans Grist) | [`projets/ecoute-client/`](projets/ecoute-client/) |
 | Valorisation des études | en préparation | [`projets/valorisation/`](projets/valorisation/) |
 

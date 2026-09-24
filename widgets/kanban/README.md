@@ -44,7 +44,8 @@ Par défaut, l'association est préremplie pour la table `Taches` de l'espace
 
 ## Limites connues (version d'origine)
 
-Relevées à la lecture du code, non encore vérifiées en test.
+Relevées à la lecture du code, puis en partie vérifiées lors du test par URL
+du 2026-09-24 (sur une copie du document de gestion de projets).
 
 **Valeurs propres à l'Observatoire, codées en dur :**
 - le projet des nouvelles cartes est la **6ᵉ ligne** de `Projets2`
@@ -54,12 +55,15 @@ Relevées à la lecture du code, non encore vérifiées en test.
   EPICs, et sur des listes de statuts propres au projet ;
 - les tables `Projets2`, `Contacts` et `EPICs` sont lues par leur nom.
 
-**Bugs probables :**
-- dans le panneau d'édition, les champs de type référence (EPIC, Assigné à)
-  proposent des numéros de ligne et les enregistrent comme du texte, ce qui
-  risque de casser la référence ;
-- `qui_` est une liste de références : le badge et le filtre « Personne »
-  affichent probablement des numéros ;
+**Bug confirmé en test :**
+- les champs de type référence (EPIC, Assigné à) sont enregistrés comme du
+  **texte** : la cellule devient invalide dans Grist, et le badge affiche
+  `#Invalid Ref` (EPIC) ou `#Invalid RefList` (`qui_`). Modifier l'EPIC d'une
+  carte depuis le panneau ✏️ ne change rien à l'affichage. **En attendant le
+  correctif, ne pas modifier ces deux champs depuis le panneau** ; les cellules
+  abîmées se réparent dans Grist en resélectionnant la valeur.
+
+**Autres défauts relevés à la lecture du code :**
 - `grist.ready()` est appelé deux fois, et un `fetchTable('EPICs')` est placé
   hors du bloc de gestion d'erreur ;
 - le préréglage cherche une colonne `Millésime`, alors qu'elle s'appelle

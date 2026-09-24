@@ -32,7 +32,7 @@ https://nantodevison.github.io/pmd-suite-numerique/widgets/<nom-du-dossier>/
 
 | Widget | Rôle | Portée | Projet(s) | Données | Accès | Statut |
 |---|---|---|---|---|---|---|
-| [kanban](kanban/) | Suivre des tâches en colonnes par statut : glisser-déposer, création, modification, filtres EPIC et personne | spécifique | observatoire-trafics | lit et écrit la table de la vue (colonnes associées via ⚙) ; lit `Projets2`, `Contacts`, `EPICs` | `full` | en développement |
+| [kanban](kanban/) | Suivre des tâches en colonnes par statut : glisser-déposer, création, modification, filtres EPIC et personne | spécifique | observatoire-trafics | lit et écrit la table de la vue (colonnes associées via ⚙) ; lit `Projets2`, `Contacts`, `EPICs` | `full` | en service |
 | [parcours-doc](parcours-doc/) | Parcourir les chapitres d'un document Docs synchronisé | spécifique | gt-cbs-bruit | lit `Chapitres` | `full` | archivé |
 | [questions](questions/) | Poser des questions sur le document et les classer par thème | spécifique | gt-cbs-bruit | lit et écrit `Questions`, `Question_Theme_Link`, `Enum_Themes`, `Widget_Session` ; lit `Users` | `full` | archivé |
 | [echanges](echanges/) | Répondre aux questions, voter, lier les réponses aux chapitres ; notifications email (désactivées) | spécifique | gt-cbs-bruit | lit et écrit `Questions`, `Reponses`, `Votes`, `Reponse_Chapitre_Link`, `Conversations`… ; lit `Chapitres`, `Users` | `full` | archivé |
