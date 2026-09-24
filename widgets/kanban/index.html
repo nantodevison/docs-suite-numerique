@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kanban Grist</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <style>
+/* ══════════════════════════════════════════════════════════════
+   KANBAN GRIST — styles v3
+   ══════════════════════════════════════════════════════════════ */
+:root {
+  --bg:          #f0f2f5;
+  --surface:     #ffffff;
+  --col-bg:      #eef0f5;
+  --col-radius:  12px;
+  --card-radius: 8px;
+  --shadow-card: 0 2px 8px rgba(9,30,66,.08);
+  --text:        #2d3748;
+  --text-muted:  #718096;
+  --accent:      #667eea;
+  --danger:      #e53e3e;
+  --warning:     #d69e2e;
+  --border:      #e2e8f0;
+  --toolbar-h:   48px;
+  --filterbar-h: 50px;
+  --font:        'Segoe UI', system-ui, sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: var(--font); font-size: 13px; color: var(--text); background: var(--bg); overflow: hidden; }
+
+/* ── Toolbar ── */
+.toolbar {
+  height: var(--toolbar-h);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.toolbar-left { display: flex; align-items: center; gap: 10px; }
+.toolbar-title { font-weight: 700; font-size: 15px; letter-spacing: -.3px; }
+.toolbar-table-name {
+  font-size: 11px; color: var(--text-muted); background: var(--col-bg);
+  border-radius: 5px; padding: 3px 10px; max-width: 220px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── Filterbar ── */
+.filterbar {
+  height: var(--filterbar-h);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.filterbar::-webkit-scrollbar { height: 0; }
+
+/* ── Vues (onglets) ── */
+.view-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.view-tab {
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  background: none;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.view-tab:hover { background: var(--col-bg); color: var(--text); }
+.view-tab.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(102,126,234,.3);
+}
+
+.filter-sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; flex-shrink: 0; }
+.filter-label { font-size: 12px; color: var(--text-muted); font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+
+.filter-select {
+  padding: 5px 26px 5px 10px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  appearance: none;
+  max-width: 180px;
+  min-width: 110px;
+  transition: border-color .15s, box-shadow .15s;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23718096' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+.filter-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(102,126,234,.15); }
+
+.filter-reset {
+  margin-left: auto; padding: 5px 12px; font-size: 12px; white-space: nowrap; flex-shrink: 0;
+}
+
+/* ── Boutons ── */
+.btn-icon {
+  background: none; border: 1.5px solid var(--border); border-radius: 8px;
+  padding: 5px 11px; font-size: 15px; cursor: pointer; color: var(--text-muted);
+  transition: all .15s; line-height: 1;
+}
+.btn-icon:hover { background: var(--col-bg); color: var(--text); }
+
+.btn-primary {
+  background: var(--accent); color: #fff; border: none; border-radius: 8px;
+  padding: 9px 22px; font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: all .15s; box-shadow: 0 2px 8px rgba(102,126,234,.3);
+}
+.btn-primary:hover { background: #5a6fd6; transform: translateY(-1px); }
+.btn-primary:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+.btn-ghost {
+  background: none; color: var(--text-muted); border: 1.5px solid var(--border);
+  border-radius: 8px; padding: 9px 18px; font-size: 13px; cursor: pointer; transition: all .15s;
+}
+.btn-ghost:hover { background: var(--col-bg); color: var(--text); }
+
+/* ── Board ── */
+.board-wrap {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--toolbar-h) - var(--filterbar-h));
+  overflow: hidden;
+}
+
+.board {
+  display: flex;
+  gap: 14px;
+  padding: 14px 16px 0 16px;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  align-items: flex-start;
+  transition: margin-right .3s ease;
+  /* les colonnes gèrent leur propre scroll vertical */
+}
+
+/* scrollbar horizontale toujours visible */
+.board::-webkit-scrollbar { height: 10px; }
+.board::-webkit-scrollbar-track { background: #e2e8f0; border-radius: 5px; }
+.board::-webkit-scrollbar-thumb { background: #a0aec0; border-radius: 5px; }
+.board::-webkit-scrollbar-thumb:hover { background: #718096; }
+
+/* piste en bas pour le scrollbar horizontal */
+.scrollbar-track {
+  flex-shrink: 0;
+  height: 14px;
+  padding: 0 16px 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.scrollbar-track::-webkit-scrollbar { height: 8px; }
+.scrollbar-track::-webkit-scrollbar-track { background: #e2e8f0; border-radius: 4px; }
+.scrollbar-track::-webkit-scrollbar-thumb { background: #a0aec0; border-radius: 4px; }
+
+.board.panel-open { margin-right: 400px; }
+
+/* ── Colonne ── */
+.column {
+  border-radius: var(--col-radius);
+  padding: 10px;
+  min-width: 290px;
+  max-width: 320px;
+  width: 290px;
+  /* hauteur fixe = prend toute la hauteur du board */
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  transition: all .2s ease;
+  border: 1.5px solid transparent;
+  overflow: hidden; /* contenu scroll à l'intérieur */
+}
+
+.column.drag-over { filter: brightness(.96); }
+.column.column-dragging { opacity: .4; transform: rotate(.8deg) scale(.98); }
+.column.column-drag-over { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(102,126,234,.2); }
+
+.column[data-statut-special="🆙Disponible"] {
+  border-style: dashed;
+  border-width: 2px;
+}
+
+.column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 2px 8px;
+  border-bottom: 2px solid rgba(0,0,0,.07);
+  cursor: grab;
+  gap: 6px;
+  flex-shrink: 0; /* ne se compresse pas */
+}
+.column-header:active { cursor: grabbing; }
+
+.column-title-wrap { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.column-title { font-weight: 700; font-size: 13px; letter-spacing: .1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.column-drag-handle { opacity: .3; font-size: 11px; flex-shrink: 0; }
+.column-count { background: rgba(0,0,0,.09); border-radius: 12px; padding: 2px 9px; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+
+.column-progress-bar {
+  height: 3px; border-radius: 2px; background: rgba(0,0,0,.08);
+  margin-top: 6px; overflow: hidden;
+}
+.column-progress-fill { height: 100%; border-radius: 2px; transition: width .4s ease; }
+
+/* zone de cartes : scroll vertical autonome */
+.cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1; /* prend tout l'espace restant */
+  padding: 8px 1px 4px;
+  min-height: 40px;
+}
+.cards-list::-webkit-scrollbar { width: 5px; }
+.cards-list::-webkit-scrollbar-track { background: transparent; }
+.cards-list::-webkit-scrollbar-thumb { background: rgba(0,0,0,.15); border-radius: 4px; }
+
+.drop-placeholder {
+  height: 56px; border: 2px dashed rgba(102,126,234,.4);
+  border-radius: var(--card-radius); background: rgba(102,126,234,.04); pointer-events: none;
+  flex-shrink: 0;
+}
+
+/* ── Bouton ajout ── */
+.btn-add-card {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 7px 10px; background: rgba(0,0,0,.04); border: 1.5px dashed rgba(0,0,0,.12);
+  border-radius: 8px; color: var(--text-muted); font-size: 13px; font-weight: 600;
+  font-family: var(--font); cursor: pointer; transition: all .15s; flex-shrink: 0;
+  text-align: left; margin-top: 6px;
+}
+.btn-add-card:hover { background: rgba(102,126,234,.08); border-color: rgba(102,126,234,.35); color: var(--accent); }
+.btn-add-card .add-icon { font-size: 16px; font-weight: 300; line-height: 1; }
+
+/* ── Carte ── */
+.card {
+  background: var(--surface);
+  border-radius: var(--card-radius);
+  padding: 12px 14px;
+  box-shadow: var(--shadow-card);
+  cursor: grab;
+  border-left: 3px solid transparent;
+  transition: transform .15s ease, box-shadow .15s ease;
+  user-select: none;
+  position: relative;
+  /* CRITIQUE : empêche l'écrasement */
+  flex-shrink: 0;
+  min-height: 70px;
+}
+.card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(9,30,66,.12); }
+.card.selected { border-left-color: var(--accent); }
+.card.dragging { opacity: .4; transform: rotate(1.5deg); cursor: grabbing; }
+
+.card-edit-btn {
+  position: absolute; top: 8px; right: 8px; background: var(--col-bg);
+  border: 1px solid var(--border); border-radius: 5px; width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center; font-size: 11px;
+  cursor: pointer; opacity: 0; transition: opacity .15s, background .15s; color: var(--text-muted);
+}
+.card-delete-btn {
+  position: absolute;
+  top: 8px;
+  right: 36px; /* décalé pour ne pas chevaucher le bouton édition */
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.card:hover .card-edit-btn { opacity: 1; }
+.card:hover .card-delete-btn {opacity: 0.7;}
+.card-edit-btn:hover { background: #e2e8f0; color: var(--text); }
+.card-delete-btn:hover {opacity: 1;}
+
+.card-title { font-weight: 600; font-size: 13px; line-height: 1.45; word-break: break-word; padding-right: 30px; color: var(--text); }
+.card-description {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  line-height: 1.5;
+    /* Troncature à 3 lignes avec ellipsis */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: calc(1.5em * 3); /* fallback si line-clamp non supporté */
+  word-break: break-word;}
+
+.card-footer { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; align-items: center; }
+
+/* ── Badges ── */
+.badge { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.badge-epic    { background: #ebf4ff; color: #3182ce; }
+.badge-assigne { background: #f0fff4; color: #276749; }
+.badge-date    { background: #fffaf0; color: #c05621; }
+.badge-millesime { background: #faf5ff; color: #6b46c1; }
+.badge-prio-haute   { background: #fed7d7; color: #c53030; }
+.badge-prio-moyenne { background: #fefcbf; color: #975a16; }
+.badge-prio-basse   { background: #bee3f8; color: #2b6cb0; }
+.badge-prio-default { background: #edf2f7; color: #4a5568; }
+
+/* ── État vide ── */
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; gap: 8px; color: var(--text-muted); padding: 60px 20px; text-align: center; }
+.empty-icon { font-size: 44px; line-height: 1; }
+.empty-hint { font-size: 11.5px; opacity: .7; max-width: 300px; }
+
+/* ══════════════════════════════════════════════════════════════
+   MODAL D'AJOUT DE CARTE
+   ══════════════════════════════════════════════════════════════ */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(45,55,72,.5);
+  backdrop-filter: blur(3px); z-index: 800;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  animation: fadeIn .18s ease;
+}
+.modal-overlay.hidden { display: none; }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+.modal-box {
+  background: var(--surface); border-radius: 14px; width: 100%; max-width: 520px;
+  box-shadow: 0 20px 60px rgba(9,30,66,.2);
+  display: flex; flex-direction: column; max-height: 90vh;
+  animation: slideUp .22s cubic-bezier(.34,1.3,.64,1); overflow: hidden;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.modal-title { font-size: 15px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.modal-statut-badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--col-bg); color: var(--text-muted); }
+.modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted); padding: 4px 8px; border-radius: 6px; line-height: 1; transition: background .15s; }
+.modal-close:hover { background: var(--col-bg); color: var(--text); }
+
+.modal-body { flex: 1; overflow-y: auto; padding: 20px 22px; display: flex; flex-direction: column; gap: 15px; }
+.modal-body::-webkit-scrollbar { width: 5px; }
+.modal-body::-webkit-scrollbar-thumb { background: #cbd5e0; border-radius: 4px; }
+
+.modal-field { display: flex; flex-direction: column; gap: 5px; }
+.modal-field label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; display: flex; align-items: center; gap: 5px; }
+.modal-field .required-star { color: var(--danger); }
+
+.modal-input {
+  width: 100%; padding: 9px 12px; border: 1.5px solid var(--border); border-radius: 8px;
+  font-size: 13px; font-family: var(--font); color: var(--text); background: var(--surface);
+  transition: border-color .15s, box-shadow .15s; appearance: none;
+}
+.modal-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(102,126,234,.12); }
+.modal-input.error { border-color: var(--danger); box-shadow: 0 0 0 3px rgba(229,62,62,.1); }
+textarea.modal-input { resize: vertical; min-height: 70px; line-height: 1.5; }
+select.modal-input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23718096' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; padding-right: 32px; cursor: pointer;
+}
+.modal-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.modal-footer { padding: 14px 22px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; flex-shrink: 0; }
+
+/* ══════════════════════════════════════════════════════════════
+   PANNEAU LATÉRAL D'ÉDITION
+   ══════════════════════════════════════════════════════════════ */
+.edit-panel {
+  position: fixed; top: 0; right: 0; width: 400px; height: 100vh;
+  background: var(--surface); border-left: 1px solid var(--border);
+  box-shadow: -6px 0 30px rgba(9,30,66,.1); z-index: 500;
+  display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform .28s cubic-bezier(.4,0,.2,1); overflow: hidden;
+}
+.edit-panel.open { transform: translateX(0); }
+
+.edit-panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; gap: 10px;
+}
+.edit-panel-title { font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .6px; }
+.edit-panel-header-actions { display: flex; gap: 6px; align-items: center; }
+.edit-panel-close { background: none; border: none; font-size: 18px; cursor: pointer; color: var(--text-muted); padding: 4px 8px; border-radius: 6px; line-height: 1; transition: background .15s; }
+.edit-panel-close:hover { background: var(--col-bg); color: var(--text); }
+
+.edit-panel-body { flex: 1; overflow-y: auto; padding: 20px 18px 30px; display: flex; flex-direction: column; gap: 18px; }
+.edit-panel-body::-webkit-scrollbar { width: 5px; }
+.edit-panel-body::-webkit-scrollbar-thumb { background: #cbd5e0; border-radius: 4px; }
+
+.edit-title-field {
+  width: 100%; font-size: 17px; font-weight: 700; color: var(--text);
+  border: none; border-bottom: 2px solid transparent; padding: 4px 0 8px;
+  font-family: var(--font); background: none; transition: border-color .15s; line-height: 1.3;
+}
+.edit-title-field:focus { outline: none; border-bottom-color: var(--accent); }
+
+.edit-prop { display: grid; grid-template-columns: 110px 1fr; align-items: start; gap: 8px 12px; }
+.edit-prop-label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; padding-top: 8px; display: flex; align-items: center; gap: 5px; }
+.edit-prop-label .prop-icon { font-size: 13px; }
+.edit-control {
+  width: 100%; padding: 7px 10px; border: 1.5px solid var(--border); border-radius: 7px;
+  font-size: 13px; font-family: var(--font); color: var(--text); background: var(--surface);
+  transition: border-color .15s, box-shadow .15s; appearance: none;
+}
+.edit-control:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(102,126,234,.12); }
+select.edit-control {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23718096' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; padding-right: 30px;
+}
+textarea.edit-control { resize: vertical; min-height: 90px; line-height: 1.5; }
+.edit-divider { height: 1px; background: var(--border); margin: 0 -18px; }
+
+.edit-panel-footer { padding: 14px 18px; border-top: 1px solid var(--border); display: flex; gap: 8px; flex-shrink: 0; }
+.edit-panel-footer .btn-primary { flex: 1; padding: 9px; font-size: 13px; }
+.edit-panel-footer .btn-ghost { padding: 9px 14px; font-size: 13px; }
+
+.edit-dirty-dot { width: 7px; height: 7px; background: var(--warning); border-radius: 50%; display: none; }
+.edit-dirty-dot.visible { display: block; }
+
+/* ── Config panel ── */
+.config-panel {
+  position: fixed; inset: 0; background: rgba(45,55,72,.5);
+  backdrop-filter: blur(3px); z-index: 1000;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.config-panel.hidden { display: none; }
+.config-inner { background: var(--surface); border-radius: 14px; padding: 28px 32px; width: 100%; max-width: 620px; box-shadow: 0 20px 60px rgba(9,30,66,.25); max-height: 90vh; overflow-y: auto; }
+.config-title { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+.config-subtitle { font-size: 13px; color: var(--text-muted); margin-bottom: 22px; line-height: 1.5; }
+.config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; }
+.config-field label { display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 5px; }
+.config-field select {
+  width: 100%; padding: 8px 10px; border: 1.5px solid var(--border); border-radius: 8px;
+  font-size: 13px; font-family: var(--font); color: var(--text); background: var(--surface);
+  cursor: pointer; transition: border-color .15s; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23718096' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; padding-right: 30px;
+}
+.config-field select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(102,126,234,.12); }
+.required { color: var(--danger); }
+.config-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+
+/* ── Toast ── */
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #2d3748; color: #fff; padding: 10px 22px; border-radius: 10px; font-size: 13px; font-weight: 500; box-shadow: 0 4px 20px rgba(0,0,0,.2); z-index: 2000; pointer-events: none; opacity: 1; transition: opacity .3s; }
+.toast.hidden { display: none; }
+.toast.fade { opacity: 0; }
+
+@media (max-width: 600px) {
+  .config-grid, .modal-row { grid-template-columns: 1fr; }
+  .column { min-width: 240px; width: 240px; }
+  .edit-panel { width: 100vw; }
+  .board.panel-open { margin-right: 0; }
+}
+  </style>
+</head>
+<body>
+
+  <!-- Config panel -->
+  <div id="config-panel" class="config-panel hidden">
+    <div class="config-inner">
+      <h2 class="config-title">⚙️ Configuration du Kanban</h2>
+      <p class="config-subtitle">Associez les colonnes de votre table aux champs du Kanban.</p>
+      <div class="config-grid">
+        <div class="config-field"><label for="col-titre">Titre <span class="required">*</span></label><select id="col-titre"><option value="">— choisir —</option></select></div>
+        <div class="config-field"><label for="col-statut">Statut <span class="required">*</span></label><select id="col-statut"><option value="">— choisir —</option></select></div>
+        <div class="config-field"><label for="col-description">Description</label><select id="col-description"><option value="">— aucune —</option></select></div>
+        <div class="config-field"><label for="col-priorite">Priorité</label><select id="col-priorite"><option value="">— aucune —</option></select></div>
+        <div class="config-field"><label for="col-assigne">Assigné à</label><select id="col-assigne"><option value="">— aucune —</option></select></div>
+        <div class="config-field"><label for="col-date">Date / Échéance</label><select id="col-date"><option value="">— aucune —</option></select></div>
+        <div class="config-field"><label for="col-epic">EPIC</label><select id="col-epic"><option value="">— aucune —</option></select></div>
+        <div class="config-field"><label for="col-millesime">Millésime / Année</label><select id="col-millesime"><option value="">— aucune —</option></select></div>
+        <div class="config-field"><label for="col-projet">Champ Projet</label><select id="col-projet"><option value="">— aucune —</option></select></div>
+      </div>
+      <div class="config-actions">
+        <button id="btn-save-config" class="btn-primary">✓ Appliquer</button>
+        <button id="btn-close-config" class="btn-ghost">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal ajout carte -->
+  <div id="add-card-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">Nouvelle carte <span id="modal-statut-badge" class="modal-statut-badge"></span></div>
+        <button id="modal-close" class="modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-footer">
+        <button id="modal-cancel" class="btn-ghost">Annuler</button>
+        <button id="modal-confirm" class="btn-primary">Créer la carte</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Panneau édition -->
+  <div id="edit-panel" class="edit-panel" role="dialog">
+    <div class="edit-panel-header">
+      <span class="edit-panel-title">✏️ Détails de la carte</span>
+      <div class="edit-panel-header-actions">
+        <span id="edit-dirty-dot" class="edit-dirty-dot"></span>
+        <button id="edit-panel-close" class="edit-panel-close">✕</button>
+      </div>
+    </div>
+    <div class="edit-panel-body" id="edit-panel-body"></div>
+    <div class="edit-panel-footer">
+      <button id="edit-save-btn" class="btn-primary">✓ Sauvegarder</button>
+      <button id="edit-cancel-btn" class="btn-ghost">Annuler</button>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <header class="toolbar">
+    <div class="toolbar-left">
+      <span class="toolbar-title">📋 Kanban</span>
+      <span id="toolbar-table-name" class="toolbar-table-name"></span>
+    </div>
+    <div class="toolbar-right">
+      <button id="btn-config" class="btn-icon" title="Configurer">⚙</button>
+    </div>
+  </header>
+
+  <!-- Filterbar -->
+  <div class="filterbar" id="filterbar">
+    <div class="view-tabs" id="view-tabs">
+      <button class="view-tab active" data-view="taches">📋 Tâches</button>
+      <button class="view-tab" data-view="standardiser">📊 Standardiser</button>
+      <button class="view-tab" data-view="lineariser">🔗 Linéariser</button>
+    </div>
+
+    <div class="filter-sep"></div>
+
+    <label for="filter-epic" class="filter-label">EPIC :</label>
+    <select id="filter-epic" class="filter-select">
+      <option value="">Tous les EPICs</option>
+    </select>
+
+    <div class="filter-sep"></div>
+
+    <label for="filter-personne" class="filter-label">Personne :</label>
+    <select id="filter-personne" class="filter-select">
+      <option value="">Toutes</option>
+    </select>
+
+    <button id="filter-reset" class="btn-ghost filter-reset">✕ Réinitialiser</button>
+  </div>
+
+  <!-- Board -->
+  <div class="board-wrap">
+    <div id="board" class="board">
+      <div class="empty-state">
+        <div class="empty-icon">📋</div>
+        <p>En attente de données…</p>
+        <p class="empty-hint">Configurez le widget et accordez l'accès à votre table.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="kanban.js"></script>
+</body>
+</html>
